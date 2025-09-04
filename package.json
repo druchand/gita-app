@@ -1,0 +1,31 @@
+{
+  "name": "gita-app",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "postinstall": "sed -i.bak '/ReactAppDependencyProvider/d' node_modules/expo/Expo.podspec"
+  }
+,
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "*",
+    "expo": "^53.0.22",
+    "expo-av": "*",
+    "expo-router": "*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-native": "^0.76.3",
+    "react-native-web": "^0.19.13"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@react-native-community/cli": "^20.0.1",
+    "@types/react": "^18.3.24",
+    "@types/react-native": "^0.72.8",
+    "typescript": "^5.3.3"
+  },
+  "private": true
+}

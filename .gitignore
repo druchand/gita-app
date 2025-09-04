@@ -1,0 +1,19 @@
+# Node/Expo
+node_modules/
+.expo/
+.expo-shared/
+dist/
+web-build/
+
+# Native (we're removing these in Option A, but ignore anyway)
+ios/
+android/
+
+# Logs & OS cruft
+npm-debug.log*
+yarn-error.log*
+.DS_Store
+
+# Env files
+.env
+.env.*

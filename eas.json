@@ -1,0 +1,22 @@
+{
+    "cli": { "version": ">= 8.0.0" },
+      "build": {
+        "production": {
+          "android": { "gradleCommand": ":app:bundleRelease" },
+          "ios": { "simulator": false }
+        },
+        "simulator": {
+              "ios": { "simulator": true }
+            },
+    "preview": {
+          "android": { "buildType": "apk" },
+          "ios": { "simulator": true }
+        },
+    "production": {
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
