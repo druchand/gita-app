@@ -1,0 +1,205 @@
+// app/index.tsx
+import { useLanguage } from "@/context/LanguageContext";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from "react-native";
+
+type ChapterSummary = {
+  chapter: string;
+  title?: string;
+  summary?: string;
+};
+
+const HOME_URL = "https://eq21.co.in/_functions/home"; // adjust if needed
+
+export default function Index() {
+  const { lang, langName, loadingLanguages } = useLanguage();
+
+  const [loading, setLoading] = useState(false);
+  const [chapters, setChapters] = useState<ChapterSummary[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  // hero fields from backend
+  const [pageTitle, setPageTitle] = useState<string>("");
+  const [pageDesc, setPageDesc] = useState<string>("");
+  const [heroImage, setHeroImage] = useState<string | null>(null);
+
+  // Abort controller ref for canceling in-flight fetches
+  const controllerRef = useRef<AbortController | null>(null);
+
+  const fetchHome = useCallback(
+    async (selectedLang: string) => {
+      if (controllerRef.current) {
+        console.log("[Index] aborting previous home fetch");
+        controllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      controllerRef.current = controller;
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const params = new URLSearchParams({ lang: selectedLang });
+        const url = `${HOME_URL}?${params.toString()}`;
+        console.log("[Index] fetching home data", url);
+
+        const res = await fetch(url, { signal: controller.signal });
+        console.log("[Index] home response status", res.status);
+
+        const text = await res.text().catch(() => "<no body>");
+        console.log("[Index] home response body", text);
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        }
+
+        const json = JSON.parse(text);
+
+        // Grab hero fields tolerant to various shapes
+        const titleFromServer = String(json.title ?? json.pageTitle ?? json.name ?? "");
+        const descFromServer = String(json.description ?? json.summary ?? json.intro ?? "");
+        const imgFromServerRaw =
+          json.imageUrl ?? json.heroImage ?? json.image ?? json.banner ?? null;
+        const imgFromServer = imgFromServerRaw ? String(imgFromServerRaw) : null;
+
+        setPageTitle(titleFromServer);
+        setPageDesc(descFromServer);
+        setHeroImage(imgFromServer);
+
+        // Obtain chapters list tolerant to shapes
+        const list = Array.isArray(json)
+          ? json
+          : Array.isArray(json.chapters)
+          ? json.chapters
+          : Array.isArray(json.data)
+          ? json.data
+          : [];
+
+        const normalized = (list || []).map((it: any) => ({
+          chapter: String(it.chapter ?? it.id ?? it.number ?? ""),
+          title: it.title ?? it.name ?? `Chapter ${it.chapter ?? it.id ?? "?"}`,
+          summary: it.summary ?? it.description ?? "",
+        })) as ChapterSummary[];
+
+        setChapters(normalized);
+      } catch (err: any) {
+        if (err?.name === "AbortError") {
+          console.log("[Index] fetch aborted (expected on rapid re-fetch)");
+        } else {
+          console.error("[Index] fetch error", err);
+          setError(err.message ?? String(err));
+          setChapters([]);
+          // Clear hero fields on error to avoid stale content
+          setPageTitle("");
+          setPageDesc("");
+          setHeroImage(null);
+        }
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (loadingLanguages) return;
+    fetchHome(lang);
+
+    return () => {
+      if (controllerRef.current) controllerRef.current.abort();
+    };
+  }, [lang, loadingLanguages, fetchHome]);
+
+  const renderListHeader = () => (
+    <View style={{ padding: 16 }}>
+      {/* Page title (from server or fallback) */}
+      <Text style={styles.pageTitle}>{pageTitle || "भगवद गीता"}</Text>
+
+      {/* Hero image or placeholder */}
+      {heroImage ? (
+        <Image source={{ uri: heroImage }} style={styles.heroImage} resizeMode="cover" />
+      ) : (
+        <View style={styles.heroImagePlaceholder} />
+      )}
+
+      {/* Hero text (description) */}
+      <Text style={styles.heroTitle}>{pageTitle || "भगवद गीता"}</Text>
+      <Text style={styles.heroDesc}>{pageDesc || `Current language: ${langName}`}</Text>
+
+      {loading ? (
+        <View style={{ paddingVertical: 12 }}>
+          <ActivityIndicator />
+          <Text style={{ marginTop: 8 }}>Loading content…</Text>
+        </View>
+      ) : error ? (
+        <View style={{ paddingVertical: 12 }}>
+          <Text style={{ color: "red" }}>Unable to load content: {error}</Text>
+          <TouchableOpacity onPress={() => fetchHome(lang)} style={styles.retryBtn}>
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+    </View>
+  );
+
+  return (
+    <FlatList
+      data={chapters}
+      keyExtractor={(item) => item.chapter}
+      numColumns={2}
+      contentContainerStyle={{ paddingBottom: 40 }}
+      columnWrapperStyle={{ justifyContent: "space-between", paddingHorizontal: 16, marginBottom: 18 }}
+      ListHeaderComponent={renderListHeader}
+      ListEmptyComponent={
+        !loading && !error ? (
+          <View style={{ padding: 16 }}>
+            <Text style={{ color: "#666" }}>No chapters available.</Text>
+          </View>
+        ) : null
+      }
+      renderItem={({ item }) => (
+        <View style={styles.card}>
+          <Text style={styles.cardText}>{item.title}</Text>
+        </View>
+      )}
+    />
+  );
+}
+
+const styles = StyleSheet.create({
+  pageTitle: { fontSize: 28, fontWeight: "800", marginBottom: 12 },
+  hero: { marginBottom: 18 },
+  heroImage: { width: "100%", height: 150, borderRadius: 10, marginBottom: 12 },
+  heroImagePlaceholder: { height: 150, borderRadius: 10, backgroundColor: "#eee", marginBottom: 12 },
+  heroTitle: { fontSize: 20, fontWeight: "700" },
+  heroDesc: { marginTop: 6, color: "#444" },
+  card: {
+    flex: 0.48,
+    height: 110,
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    justifyContent: "center",
+    padding: 12,
+    shadowColor: "#000",
+    shadowOpacity: 0.03,
+    shadowRadius: 6,
+  },
+  cardText: { fontWeight: "700", fontSize: 14 },
+  retryBtn: {
+    marginTop: 8,
+    backgroundColor: "#007AFF",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignSelf: "flex-start",
+  },
+  retryText: { color: "#fff", fontWeight: "600" },
+});

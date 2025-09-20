@@ -8,24 +8,31 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "postinstall": "sed -i.bak '/ReactAppDependencyProvider/d' node_modules/expo/Expo.podspec"
-  }
-,
+  },
   "dependencies": {
-    "@react-native-async-storage/async-storage": "*",
+    "@react-native-async-storage/async-storage": "2.1.2",
     "expo": "^53.0.22",
     "expo-av": "*",
-    "expo-router": "*",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-native": "^0.76.3",
-    "react-native-web": "^0.19.13"
+    "expo-constants": "~17.1.7",
+    "expo-linking": "~7.1.7",
+    "expo-router": "~5.1.5",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "react-native": "0.79.5",
+    "react-native-safe-area-context": "5.4.0",
+    "react-native-screens": "~4.11.1",
+    "react-native-web": "^0.20.0",
+    "react-native-gesture-handler": "~2.24.0",
+    "expo-secure-store": "~14.2.4"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@react-native-community/cli": "^20.0.1",
-    "@types/react": "^18.3.24",
-    "@types/react-native": "^0.72.8",
-    "typescript": "^5.3.3"
+    "@types/react": "~19.0.10",
+    "metro": "^0.82.5",
+    "metro-config": "^0.82.5",
+    "metro-resolver": "^0.82.5",
+    "typescript": "~5.8.3"
   },
   "private": true
 }

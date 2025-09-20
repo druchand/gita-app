@@ -1,0 +1,152 @@
+diff --git a/README.md b/README.md
+new file mode 100644
+index 0000000..e69de29
+--- /dev/null
++++ b/README.md
+@@ -0,0 +1,160 @@
++# Project README — Git workflow & tiny CI
++ 
++This short README documents the recommended Git workflow for this project, how to apply patches, and includes a minimal GitHub Actions CI job that runs TypeScript checks and installs dependencies on pull requests.
++
++> Keep changes small, commit often, and use feature branches + PRs. Commit messages should be short and descriptive.
++
++---
++
++## Quick local workflow (recommended)
++
++1. Create a feature branch:
++
++```bash
++git checkout -b feat/short-description
++```
++
++2. Make small focused edits; review status:
++
++```bash
++git status
++git diff            # unstaged changes
++git add <files>
++git diff --staged   # staged changes
++```
++
++3. Commit with a clear message:
++
++```bash
++git commit -m "fix(chapter): fetch metadata from /_functions/chapter and defer verses load"
++```
++
++4. Push the branch and open a Pull Request:
++
++```bash
++git push -u origin feat/short-description
++# open a PR in your Git hosting UI (GitHub/GitLab/Bitbucket)
++```
++
++5. After PR review and CI green, merge to `main` (or your protected branch).
++
++---
++
++## Working with patches (when you need to send changes outside of pushing to remote)
++
++### Create a unified-diff patch from working tree
++
++```bash
++# for all unstaged changes
++git diff > my-change.patch
++
++# for staged changes
++git diff --staged > my-staged.patch
++
++# for differences between two commits
++git diff <commitA> <commitB> > changes.patch
++```
++
++### Apply a patch
++
++```bash
++# check the patch will apply cleanly
++git apply --check my-change.patch
++
++# actually apply
++git apply my-change.patch
++
++# optionally stage the changes for commit
++git apply --index my-change.patch
++```
++
++### Create a patch that preserves commit metadata (recommended when sharing commits)
++
++```bash
++# create commits first, then export them as patch files
++git format-patch origin/main..HEAD -o patches/
++
++# apply elsewhere (preserves author/date/message)
++git am patches/0001-*.patch
++```
++
++---
++
++## Recovering / inspecting history
++
++- Use `git log --oneline --graph` to inspect recent history.
++- If a full-file replacement accidentally removes important changes, you can find the earlier commit and cherry-pick or revert it.
++- `git reflog` helps recover lost state on a local machine.
++
++---
++
++## Minimal GitHub Actions CI example
++
++Create a file `.github/workflows/ci.yml` with the following contents. It runs on PRs and checks out the code, installs dependencies, and runs a TypeScript check (or an `npm test` script if you have one).
++
++```yaml
++name: CI
++
++on:
++  pull_request:
++    branches: [ main ]
++
++jobs:
++  build:
++    runs-on: ubuntu-latest
++
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v4
++
++      - name: Use Node.js 18
++        uses: actions/setup-node@v4
++        with:
++          node-version: '18'
++
++      - name: Install dependencies
++        run: npm ci
++
++      - name: Type check
++        run: npm run type-check
++        # If you don't have a type-check script, create one in package.json:
++        # "type-check": "tsc --noEmit"
++
++      - name: Run tests (optional)
++        run: npm test
++```
++
++This CI keeps the repo healthy and gives quick feedback on PRs.
++
++---
++
++## Small best-practices & tips
++
++- Protect `main` and require PR reviews + passing CI before merge.
++- Keep commits atomic (one change per commit) and write clear commit messages.
++- Use `git stash` if you need to switch branches but preserve WIP.
++- Use `URLSearchParams` in code when building query strings to avoid `?`/`&` bugs.
++- When I provide full-file replacements, commit them on a feature branch (with a message noting the replacement) so history is preserved.
++
++---
++
++If you want, I can:
++- Commit this README and create the CI workflow patch for you to `git apply`.
++- Or produce a single `git apply` patch that adds `.github/workflows/ci.yml` and `README.md`.
++
++Tell me which you prefer and I’ll prepare the patch (or commit instructions) next.
++

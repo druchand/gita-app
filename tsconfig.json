@@ -8,10 +8,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
-    "paths": {
-      "@/*": ["app/*"]
-    },
+    "paths": { "@/*": ["src/*"] },
     "types": ["react", "react-native"]
   },
-  "include": ["app", "utils", "lib", "assets", "declarations.d.ts"]
+  "include": ["app", "src", "utils", "lib", "assets", "declarations.d.ts"]
 }

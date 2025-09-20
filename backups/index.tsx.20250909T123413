@@ -1,6 +1,6 @@
 // app/index.tsx
 import CollapsibleText from "@/components/CollapsibleText";
-import { useLanguage } from '@/context/LanguageContext';
+import { useLanguage } from "@/context/LanguageContext";
 import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -10,7 +10,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from "react-native";
 
 type ChapterSummary = {
@@ -37,83 +37,83 @@ export default function Index() {
   // Abort controller ref for canceling in-flight fetches
   const controllerRef = useRef<AbortController | null>(null);
 
-  // fetchHome accepts selectedLang so callers can explicitly choose the language
-  const fetchHome = useCallback(async (selectedLang: string) => {
-    if (controllerRef.current) {
-      console.log("[Index] aborting previous home fetch");
-      controllerRef.current.abort();
-    }
-    const controller = new AbortController();
-    controllerRef.current = controller;
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const params = new URLSearchParams({ lang: selectedLang });
-      const url = `${HOME_URL}?${params.toString()}`;
-      // console.log("[Index] fetching home data", url);
-
-      const res = await fetch(url, { signal: controller.signal });
-      // console.log("[Index] home response status", res.status);
-
-      const text = await res.text().catch(() => "<no body>");
-      // console.log("[Index] home response body", text);
-
-      if (!res.ok) {
-        // try to parse JSON error if present
-        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  const fetchHome = useCallback(
+    async (selectedLang: string) => {
+      if (controllerRef.current) {
+        console.log("[Index] aborting previous home fetch");
+        controllerRef.current.abort();
       }
+      const controller = new AbortController();
+      controllerRef.current = controller;
 
-      const json = JSON.parse(text);
+      setLoading(true);
+      setError(null);
 
-      // Grab hero fields tolerant to various shapes
-      const titleFromServer = String(json.title ?? json.pageTitle ?? json.name ?? "");
-      const descFromServer = String(json.description ?? json.summary ?? json.intro ?? "");
-      const imgFromServerRaw = json.imageUrl ?? json.heroImage ?? json.image ?? json.banner ?? null;
-      const imgFromServer = imgFromServerRaw ? String(imgFromServerRaw) : null;
+      try {
+        const params = new URLSearchParams({ lang: selectedLang });
+        const url = `${HOME_URL}?${params.toString()}`;
+        console.log("[Index] fetching home data", url);
 
-      setPageTitle(titleFromServer);
-      setPageDesc(descFromServer);
-      setHeroImage(imgFromServer);
+        const res = await fetch(url, { signal: controller.signal });
+        console.log("[Index] home response status", res.status);
 
-      // Obtain chapters list tolerant to shapes
-      const list = Array.isArray(json)
-        ? json
-        : Array.isArray(json.chapters)
-        ? json.chapters
-        : Array.isArray(json.data)
-        ? json.data
-        : [];
+        const text = await res.text().catch(() => "<no body>");
+        console.log("[Index] home response body", text);
 
-      const normalized = (list || []).map((it: any) => ({
-        chapter: String(it.chapter ?? it.id ?? it.number ?? ""),
-        title: it.title ?? it.name ?? `Chapter ${it.chapter ?? it.id ?? "?"}`,
-        summary: it.summary ?? it.description ?? "",
-      })) as ChapterSummary[];
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        }
 
-      setChapters(normalized);
-    } catch (err: any) {
-      if (err?.name === "AbortError") {
-        console.log("[Index] fetch aborted (expected on rapid re-fetch)");
-      } else {
-        console.error("[Index] fetch error", err);
-        setError(err.message ?? String(err));
-        setChapters([]);
-        // Clear hero fields on error to avoid stale content
-        setPageTitle("");
-        setPageDesc("");
-        setHeroImage(null);
+        const json = JSON.parse(text);
+
+        // Grab hero fields tolerant to various shapes
+        const titleFromServer = String(json.title ?? json.pageTitle ?? json.name ?? "");
+        const descFromServer = String(json.description ?? json.summary ?? json.intro ?? "");
+        const imgFromServerRaw =
+          json.imageUrl ?? json.heroImage ?? json.image ?? json.banner ?? null;
+        const imgFromServer = imgFromServerRaw ? String(imgFromServerRaw) : null;
+
+        setPageTitle(titleFromServer);
+        setPageDesc(descFromServer);
+        setHeroImage(imgFromServer);
+
+        // Obtain chapters list tolerant to shapes
+        const list = Array.isArray(json)
+          ? json
+          : Array.isArray(json.chapters)
+          ? json.chapters
+          : Array.isArray(json.data)
+          ? json.data
+          : [];
+
+        const normalized = (list || []).map((it: any) => ({
+          chapter: String(it.chapter ?? it.id ?? it.number ?? ""),
+          title: it.title ?? it.name ?? `Chapter ${it.chapter ?? it.id ?? "?"}`,
+          summary: it.summary ?? it.description ?? "",
+        })) as ChapterSummary[];
+
+        setChapters(normalized);
+      } catch (err: any) {
+        if (err?.name === "AbortError") {
+          console.log("[Index] fetch aborted (expected on rapid re-fetch)");
+        } else {
+          console.error("[Index] fetch error", err);
+          setError(err.message ?? String(err));
+          setChapters([]);
+          // Clear hero fields on error to avoid stale content
+          setPageTitle("");
+          setPageDesc("");
+          setHeroImage(null);
+        }
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    },
+    []
+  );
 
-  // Run on mount and whenever language finishes loading / changes
   useEffect(() => {
     if (loadingLanguages) return;
-    // pass the selected language explicitly
     fetchHome(lang);
 
     return () => {
@@ -147,14 +147,8 @@ export default function Index() {
       {/* Hero text (collapsible) */}
       <Text style={styles.heroTitle}>{pageTitle || "भगवद गीता"}</Text>
 
-      {/* 
-        Key note: we give CollapsibleText a `key={lang}` so that when the language
-        changes the component is remounted and guaranteed to show the new text.
-        This avoids subtle caching/internal state issues inside the collapsible component.
-      */}
       <CollapsibleText
-        key={lang}
-        text={pageDesc || `Current language: ${langName ?? lang}`}
+        text={pageDesc || `Current language: ${langName}`}
         numberOfLines={12} // collapsed to 12 lines
         readMoreText="...more"
         showLessText="...less"
