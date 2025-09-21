@@ -8,10 +8,11 @@ module.exports = function (api) {
         {
           root: ["./"],
           alias: {
-            "@": "./src"
-          }
-        }
-      ]
-    ]
+            "@": "./src",
+          },
+        },
+      ],
+      // any other plugins you need
+    ],
   };
 };

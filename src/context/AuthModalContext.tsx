@@ -1,24 +1,16 @@
-// app/context/AuthModalContext.tsx
-import React, { createContext, ReactNode, useCallback, useContext, useState } from "react";
+// src/context/AuthModalContext.tsx
+import authApi, { AuthCredentials, LoginResult } from "app/utils/authApi";
+import React, {
+  createContext,
+  ReactNode,
+  useCallback,
+  useContext,
+  useState,
+} from "react";
 
 /**
- * AuthModal context API expected by your components/AuthModal.tsx
- *
- * Fields included to match usage:
- *  - open: boolean
- *  - setOpen: (b: boolean) => void
- *  - loading: boolean
- *  - login: async function accepting { identifier, password } and resolving on success
- *  - signup, forgotPassword: simple stubs for future wiring
- *  - openLogin/openSignup helpers
- *  - user, setUser placeholders
+ * AuthModal context API expected by components/AuthModal.tsx and AppHeader.
  */
-
-export type AuthCredentials = {
-  identifier: string; // email or phone
-  password?: string;
-};
-
 export type AuthModalCtx = {
   open: boolean;
   setOpen: (v: boolean) => void;
@@ -45,56 +37,80 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState<boolean>(false);
   const [user, setUser] = useState<any | null>(null);
 
-  // Example login implementation - replace with real backend call
-  const login = useCallback(
-    async (creds: AuthCredentials) => {
-      console.log("[AuthModal] login()", creds);
-      setLoading(true);
-      try {
-        // TODO: replace with real fetch to your Wix backend
-        // Example:
-        // const res = await fetch("/.netlify/functions/login", { method: "POST", body: JSON.stringify(creds) })
-        await new Promise((r) => setTimeout(r, 900)); // simulate delay
-
-        // fake success object
-        const fakeUser = { id: "u123", name: "Demo User", identifier: creds.identifier };
-
-        setUser(fakeUser);
-        setOpen(false); // close modal on success
-        return { success: true, user: fakeUser };
-      } catch (err: any) {
-        console.error("[AuthModal] login error", err);
-        return { success: false, error: err?.message ?? "Unknown error" };
-      } finally {
-        setLoading(false);
-      }
-    },
-    []
-  );
-
-  const signup = useCallback(async (creds: AuthCredentials) => {
-    console.log("[AuthModal] signup()", creds);
+  /**
+   * login - calls authApi.login, persists token on success, sets user, closes modal
+   */
+  const login = useCallback(async (creds: AuthCredentials) => {
     setLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 1000));
-      const fakeUser = { id: "u_new", name: creds.identifier };
-      setUser(fakeUser);
-      setOpen(false);
-      return { success: true, user: fakeUser };
+      const res: LoginResult = await authApi.login(creds);
+
+      if (!res.success) {
+        return { success: false, error: res.error ?? "Login failed" };
+      }
+
+      // persist token if available
+      if (res.token) {
+        try {
+          await authApi.setAuthToken(res.token);
+        } catch (e) {
+          // non-fatal: log and continue
+          console.warn("[AuthModal] setAuthToken failed", e);
+        }
+      }
+
+      setUser(res.user ?? null);
+      setOpen(false); // close modal on success
+      return { success: true, user: res.user };
     } catch (err: any) {
+      console.error("[AuthModal] login error", err);
       return { success: false, error: err?.message ?? "Unknown error" };
     } finally {
       setLoading(false);
     }
   }, []);
 
-  const forgotPassword = useCallback(async (identifier: string) => {
-    console.log("[AuthModal] forgotPassword()", identifier);
+  /**
+   * signup - calls authApi.signup, persists token on success, sets user, closes modal
+   */
+  const signup = useCallback(async (creds: AuthCredentials) => {
     setLoading(true);
     try {
-      await new Promise((r) => setTimeout(r, 700));
-      return { success: true };
+      const res: LoginResult = await authApi.signup(creds);
+
+      if (!res.success) {
+        return { success: false, error: res.error ?? "Signup failed" };
+      }
+
+      if (res.token) {
+        try {
+          await authApi.setAuthToken(res.token);
+        } catch (e) {
+          console.warn("[AuthModal] setAuthToken failed", e);
+        }
+      }
+
+      setUser(res.user ?? null);
+      setOpen(false);
+      return { success: true, user: res.user };
     } catch (err: any) {
+      console.error("[AuthModal] signup error", err);
+      return { success: false, error: err?.message ?? "Unknown error" };
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  /**
+   * forgotPassword - calls authApi.forgotPassword
+   */
+  const forgotPassword = useCallback(async (identifier: string) => {
+    setLoading(true);
+    try {
+      const res = await authApi.forgotPassword(identifier);
+      return { success: res.success, error: res.error };
+    } catch (err: any) {
+      console.error("[AuthModal] forgotPassword error", err);
       return { success: false, error: err?.message ?? "Unknown error" };
     } finally {
       setLoading(false);
@@ -103,17 +119,22 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
 
   const openLogin = () => {
     setOpen(true);
-    // you can also set a "mode" state if your modal component needs to know which sub-form to show
+    // If your modal has multiple modes (login/signup) you can set a mode state here.
   };
 
   const openSignup = () => {
     setOpen(true);
   };
 
-  const logout = () => {
+  const logout = useCallback(async () => {
+    try {
+      await authApi.clearAuthToken();
+    } catch (e) {
+      console.warn("[AuthModal] clearAuthToken failed", e);
+    }
     setUser(null);
     console.log("[AuthModal] logged out");
-  };
+  }, []);
 
   const value: AuthModalCtx = {
     open,
@@ -130,3 +151,5 @@ export function AuthModalProvider({ children }: { children: ReactNode }) {
 
   return <AuthModalContext.Provider value={value}>{children}</AuthModalContext.Provider>;
 }
+
+export default AuthModalContext;

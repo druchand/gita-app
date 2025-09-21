@@ -11,9 +11,9 @@ import {
   View,
 } from "react-native";
 
+import LanguageModal from "@/components/LanguageModal";
 import { useAuthModal } from "@/context/AuthModalContext";
 import { useLanguage } from "@/context/LanguageContext";
-import LanguageModal from "./LanguageModal";
 
 type Props = {
   title?: string;

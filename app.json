@@ -30,7 +30,9 @@
       "bundleIdentifier": "com.anonymous.gitaapp"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-audio",
+      "expo-video"
     ]
   }
 }
