@@ -95,7 +95,6 @@ export default function AppHeader({ title = "Gita App" }: Props): React.ReactEle
           >
             <Text>Human Dilemma</Text>
           </TouchableOpacity>
-
           <TouchableOpacity
             style={styles.menuItem}
             onPress={() => {
