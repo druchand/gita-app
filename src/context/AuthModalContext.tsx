@@ -1,5 +1,5 @@
 // src/context/AuthModalContext.tsx
-import authApi, { AuthCredentials, LoginResult } from "app/utils/authApi";
+import authApi, { AuthCredentials, LoginResult } from "@/utils/authApi";
 import React, {
   createContext,
   ReactNode,
