@@ -1,120 +1,104 @@
-// context/LanguageContext.tsx
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import LanguageModal from "@/components/LanguageModal";
+import React, { createContext, useContext, useEffect, useState } from "react";
 
-export type LanguageItem = {
-  id: string;      // e.g. "EN", "HI", "FR"
-  name: string;    // human label/display (what the backend provides)
-  // any other fields returned by backend are allowed but not required
+/**
+ * Lang shape used across the app.
+ */
+type LangShape = string | { code?: string; name?: string } | null;
+
+export type LanguageContextValue = {
+  lang?: LangShape;
+  langName?: string | null;
+  availableLangs?: { code: string; name: string }[];
+  openLanguage: () => void;
+  closeLanguage: () => void;
+  setLangCode?: (code: string) => Promise<void>;
+  isOpen: boolean;
 };
 
-type LanguageContextType = {
-  languages: LanguageItem[];
-  loadingLanguages: boolean;
-  lang: string;         // selected language code
-  langName: string;     // selected language human label
-  setLang: (l: string) => void;
+const LanguageContext = createContext<LanguageContextValue | null>(null);
+
+export const useLanguage = (): LanguageContextValue => {
+  const ctx = useContext(LanguageContext);
+  if (!ctx) throw new Error("useLanguage must be used within LanguageProvider");
+  return ctx;
 };
 
-const DEFAULT_LANGUAGES: LanguageItem[] = [
-  { id: "EN", name: "English" },
-  { id: "HI", name: "हिन्दी" },
-];
+export const LanguageProvider: React.FC<{ children: React.ReactNode; anchorTop?: number }> = ({
+  children,
+  anchorTop = 0,
+}) => {
+  const [lang, setLang] = useState<LangShape>("EN");
+  const [availableLangs, setAvailableLangs] = useState<{ code: string; name: string }[] | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
 
-const LANGS_URL = "https://eq21.co.in/_functions/langs"; // <- change if your endpoint differs
+  // set human-friendly name derived from `lang`
+  const langName = (() => {
+    if (!lang) return null;
+    if (typeof lang === "string") return lang;
+    return (lang as any).name ?? (lang as any).code ?? null;
+  })();
 
-const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
+  async function setLangCode(code: string) {
+    // keep simple: set local state; caller can also call backend if needed
+    setLang(code);
+    // optionally persist to localStorage / backend here
+    return Promise.resolve();
+  }
 
-export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  console.log("[LanguageProvider] mounted");
-  const [languages, setLanguages] = useState<LanguageItem[]>(DEFAULT_LANGUAGES);
-  const [loadingLanguages, setLoadingLanguages] = useState<boolean>(false);
-  const [lang, setLangState] = useState<string>(DEFAULT_LANGUAGES[0].id);
-
-  // get human name for current lang (falls back to code)
-  const langName = useMemo(() => {
-    const found = languages.find((l) => l.id === lang);
-    return found ? found.name : lang;
-  }, [languages, lang]);
-  
-  // Fetch languages list from backend once
-  useEffect(() => {
-    let mounted = true;
-    const controller = new AbortController();
-
-    async function fetchLanguages() {
-      setLoadingLanguages(true);
-      try {
-        const res = await fetch(LANGS_URL, { signal: controller.signal });
-        if (!res.ok) {
-          console.warn("[LanguageContext] languages fetch failed", res.status);
-          setLoadingLanguages(false);
-          return;
-        }
-        const json = await res.json();
-        // backend might return { languages: [...] } or an array directly
-        const list: any[] = Array.isArray(json) ? json : json.languages ?? [];
-        if (!list || list.length === 0) {
-          setLoadingLanguages(false);
-          return;
-        }
-        // Normalize items to { id, name }
-        const normalized = list.map((it: any) => ({
-          id: String(it.id ?? it.code ?? it.lang ?? it.key),
-          name: String(it.name ?? it.label ?? it.langName ?? it.display ?? it.id),
-        }));
-        if (mounted) {
-          setLanguages(normalized);
-          // if current lang is not in list, pick first from server
-          const hasSelected = normalized.some((i: any) => i.id === lang);
-          if (!hasSelected) {
-            setLangState(normalized[0].id);
-          }
-        }
-      } catch (e) {
-        if ((e as any).name === "AbortError") {
-          /* ignore */
-        } else {
-          console.warn("[LanguageContext] fetch error", e);
-        }
-      } finally {
-        if (mounted) setLoadingLanguages(false);
-      }
-    }
-
-    fetchLanguages();
-
-    return () => {
-      mounted = false;
-      controller.abort();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // runs once
-
-  const setLang = (l: string) => {
-    // allow setting even if not in list (server may add later)
-    setLangState(l);
+  const openLanguage = () => {
+    setIsOpen(true);
+  };
+  const closeLanguage = () => {
+    setIsOpen(false);
   };
 
-  const value = useMemo(
-    () => ({
-      languages,
-      loadingLanguages,
-      lang,
-      langName,
-      setLang,
-    }),
-    [languages, loadingLanguages, lang, langName]
+  // global controller so AppHeader can call (similar to MenuController)
+  useEffect(() => {
+    (globalThis as any).LanguageController = {
+      open: openLanguage,
+      close: closeLanguage,
+    };
+    console.debug("[LanguageProvider] mounted");
+    // fetch languages from backend if needed
+    (async () => {
+      try {
+        // example endpoint — replace with your real one (or remove)
+        const res = await fetch("https://eq21.co.in/_functions/langs");
+        const data = await res.json();
+        if (Array.isArray(data?.langs)) setAvailableLangs(data.langs);
+      } catch (e) {
+        // fallback defaults
+        setAvailableLangs([
+          { code: "EN", name: "English" },
+          { code: "HI", name: "Hindi" },
+        ]);
+      }
+    })();
+
+    return () => {
+      delete (globalThis as any).LanguageController;
+      console.debug("[LanguageProvider] unmounted");
+    };
+  }, []);
+
+  const value: LanguageContextValue = {
+    lang,
+    langName,
+    availableLangs: availableLangs ?? undefined,
+    openLanguage,
+    closeLanguage,
+    setLangCode,
+    isOpen,
+  };
+
+  return (
+    <LanguageContext.Provider value={value}>
+      {children}
+      {/* Render modal UI from here so it's mounted at top-level and can overlay content */}
+      <LanguageModal visible={isOpen} onClose={closeLanguage} anchorTop={anchorTop} />
+    </LanguageContext.Provider>
   );
+};
 
-  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
-}
-
-export function useLanguage(): LanguageContextType {
-  const ctx = useContext(LanguageContext);
-  if (!ctx) {
-    throw new Error("useLanguage must be used within LanguageProvider");
-  }
-  return ctx;
-}
-
-export default LanguageContext;
+export default LanguageProvider;

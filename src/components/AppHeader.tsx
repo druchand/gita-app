@@ -1,161 +1,164 @@
 // src/components/AppHeader.tsx
-import { useRouter } from "expo-router";
-import React, { useState } from "react";
-import {
-  Modal,
-  Platform,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  View,
-} from "react-native";
+import React from "react";
+import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import LanguageModal from "@/components/LanguageModal";
-import { useAuthModal } from "@/context/AuthModalContext";
-import { useLanguage } from "@/context/LanguageContext";
+// Try the canonical hook names (these must exist in your repo). If not available,
+// the code below gracefully degrades.
+let useAuthHook: (() => any) | null = null;
+let useLanguageHook: (() => any) | null = null;
+let useMenuDrawerHook: (() => any) | null = null;
+
+try {
+  // prefer named / exported hook if present
+  // (if your context exports default or differently, these calls will be ignored)
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const authModule = require("../context/AuthModalContext");
+  if (typeof authModule.useAuth === "function") useAuthHook = authModule.useAuth;
+} catch (e) {
+  // ignore
+}
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const langModule = require("../context/LanguageContext");
+  if (typeof langModule.useLanguage === "function") useLanguageHook = langModule.useLanguage;
+} catch (e) {
+  // ignore
+}
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const menuModule = require("./MenuDrawer");
+  if (typeof menuModule.useMenuDrawer === "function") useMenuDrawerHook = menuModule.useMenuDrawer;
+} catch (e) {
+  // ignore
+}
+
+export const HEADER_HEIGHT = 64; // exported so layout can align drawers beneath header
 
 type Props = {
   title?: string;
 };
 
 export default function AppHeader({ title = "Gita App" }: Props): React.ReactElement {
-  const router = useRouter();
+  const insets = useSafeAreaInsets();
 
-  // Hooks must be inside component
-  const auth = useAuthModal();
-  const { langName } = useLanguage();
+  // read context if hooks present (defensive)
+  const auth = (typeof useAuthHook === "function" ? useAuthHook() : null) ?? null;
+  const language = (typeof useLanguageHook === "function" ? useLanguageHook() : null) ?? null;
+  const menuCtx = (typeof useMenuDrawerHook === "function" ? useMenuDrawerHook() : null) ?? null;
 
-  const [menuVisible, setMenuVisible] = useState(false);
-  const [langModalVisible, setLangModalVisible] = useState(false);
+  // fallback to global controller (some older code used globalThis.MenuModule)
+  const globalMenu = (globalThis as any)?.MenuModule ?? null;
 
-  const openAuth = () => {
-    // prefer helper if available
-    if (auth.openLogin) {
-      auth.openLogin();
-    } else {
-      auth.setOpen(true);
+  const onMenuPress = () => {
+    // try multiple method names seen across versions
+    const menu = menuCtx ?? globalMenu;
+    if (!menu) {
+      console.debug("[AppHeader] no menu controller found");
+      return;
     }
+    const openFns = ["openMenu", "open", "toggle", "show"];
+    for (const fn of openFns) {
+      if (typeof menu[fn] === "function") {
+        try {
+          menu[fn]();
+          console.debug("[AppHeader] called menu.", fn);
+        } catch (err) {
+          console.debug("[AppHeader] error calling menu.", fn, err);
+        }
+        return;
+      }
+    }
+    // last resort: if provider exposes setOpen
+    if (typeof menu.setOpen === "function") menu.setOpen(true);
   };
 
+  const onLanguagePress = () => {
+    // language provider may expose openLanguage or setLanguage or open
+    if (language) {
+      if (typeof language.openLanguage === "function") return language.openLanguage();
+      if (typeof language.open === "function") return language.open();
+      if (typeof language.setLangCode === "function" && language.lang) {
+        // open fallback - if setLangCode exists, we can't open a UI - just log
+        return console.debug("[AppHeader] language setLangCode available but no modal opener.");
+      }
+    }
+    // fallback: try global
+    const gm = (globalThis as any)?.LanguageModule ?? null;
+    if (gm && typeof gm.open === "function") gm.open();
+  };
+
+  const onLoginPress = () => {
+    if (auth) {
+      if (typeof auth.openLogin === "function") return auth.openLogin();
+      if (typeof auth.open === "function") return auth.open();
+      if (typeof auth.setOpen === "function") return auth.setOpen(true);
+    }
+    const ga = (globalThis as any)?.AuthModule ?? null;
+    if (ga && typeof ga.open === "function") ga.open();
+  };
+
+  const avatarUri =
+    auth?.user?.profile?.coverPhoto?.url ?? auth?.user?.profile?.avatar ?? auth?.user?.picture ?? null;
+  const displayName = auth?.user?.profile?.firstName ?? auth?.user?.firstName ?? auth?.user?.profile?.nickname ?? null;
+
+  const langLabel = language?.langName ?? (typeof language?.lang === "string" ? language.lang : (language?.lang as any)?.code ?? "EN");
+
   return (
-    <>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => setMenuVisible(true)}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          style={styles.left}
-        >
-          <Text style={styles.icon}>☰</Text>
+    <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
+      <View style={styles.row}>
+        <TouchableOpacity style={styles.iconWrap} onPress={onMenuPress} testID="header-menu">
+          <Text style={styles.iconText}>☰</Text>
         </TouchableOpacity>
 
-        <Text numberOfLines={1} style={styles.title}>
-          {title}
-        </Text>
+        <View style={styles.titleWrap}>
+          <Text style={styles.titleText}>{title}</Text>
+        </View>
 
-        <View style={styles.right}>
-          <TouchableOpacity onPress={() => setLangModalVisible(true)} style={styles.langBtn}>
-            <Text style={styles.langText}>{langName}</Text>
+        <View style={styles.rightRow}>
+          <TouchableOpacity style={styles.langWrap} onPress={onLanguagePress} testID="header-lang">
+            <Text style={styles.langText}>{String(langLabel ?? "EN")}</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={openAuth} style={styles.loginBtn}>
-            <Text style={styles.loginText}>{auth.user ? "Logout" : "Login"}</Text>
+          <TouchableOpacity style={styles.loginWrap} onPress={onLoginPress} testID="header-login">
+            {avatarUri ? (
+              <Image source={{ uri: avatarUri }} style={styles.avatar} />
+            ) : (
+              <Text style={styles.loginText}>{displayName ? displayName : "Login"}</Text>
+            )}
           </TouchableOpacity>
         </View>
       </View>
-
-      {/* Menu as Modal so it sits above everything and is tappable even under notches */}
-      <Modal
-        visible={menuVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMenuVisible(false)}
-      >
-        <TouchableWithoutFeedback onPress={() => setMenuVisible(false)}>
-          <View style={styles.modalOverlay} />
-        </TouchableWithoutFeedback>
-
-        <View style={styles.menuContainer}>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => {
-              setMenuVisible(false);
-              router.push("/");
-            }}
-          >
-            <Text>Home</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => {
-              setMenuVisible(false);
-              router.push("/human-dilemma");
-            }}
-          >
-            <Text>Human Dilemma</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => {
-              setMenuVisible(false);
-              router.push("/about");
-            }}
-          >
-            <Text>About</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
-
-      {/* Language modal controlled by header */}
-      <LanguageModal visible={langModalVisible} onClose={() => setLangModalVisible(false)} />
-    </>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
-    height: 64,
-    paddingTop: Platform.OS === "ios" ? 12 : 8,
-    paddingHorizontal: 12,
-    backgroundColor: "#fff",
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#ddd",
+  headerContainer: {
+    height: HEADER_HEIGHT,
+    backgroundColor: "#ffffff",
+    borderBottomWidth: 0.5,
+    borderBottomColor: "#e6e6e6",
+    justifyContent: "center",
+  },
+  row: {
     flexDirection: "row",
     alignItems: "center",
-  },
-  left: { width: 44, justifyContent: "center", alignItems: "center" },
-  icon: { fontSize: 22 },
-  title: { flex: 1, textAlign: "center", fontSize: 18, fontWeight: "600" },
-  right: { flexDirection: "row", alignItems: "center" },
-  langBtn: { marginRight: 12, padding: 6 },
-  langText: { fontSize: 14 },
-  loginBtn: { padding: 6 },
-  loginText: { color: "#007AFF", fontSize: 14 },
-
-  /* Modal overlay/menu */
-  modalOverlay: {
+    paddingHorizontal: 12,
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.25)",
   },
-  menuContainer: {
-    position: "absolute",
-    top: 80,
-    right: 12,
-    width: 220,
-    backgroundColor: "#fff",
-    borderRadius: 8,
-    elevation: 12,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    paddingVertical: 6,
-    zIndex: 9999,
+  iconWrap: {
+    width: 44,
+    alignItems: "flex-start",
+    justifyContent: "center",
   },
-  menuItem: {
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#eee",
-  },
+  iconText: { fontSize: 22 },
+  titleWrap: { flex: 1, alignItems: "center", justifyContent: "center" },
+  titleText: { fontSize: 18, fontWeight: "700" },
+  rightRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  langWrap: { paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6, backgroundColor: "#f5f5f5" },
+  langText: { fontWeight: "600" },
+  loginWrap: { marginLeft: 8, paddingHorizontal: 6 },
+  loginText: { fontWeight: "600" },
+  avatar: { width: 34, height: 34, borderRadius: 34 },
 });

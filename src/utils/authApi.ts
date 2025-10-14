@@ -1,157 +1,234 @@
 // src/utils/authApi.ts
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 
+/** =========================
+ * Config: base URL
+ * ========================= */
 const DEFAULT_BASE = "https://eq21.co.in/_functions";
-const BASE =
-  (typeof globalThis !== "undefined" && (globalThis as any).AUTH_BASE_URL) ||
+
+export const AUTH_BASE: string =
+  // allow overriding at runtime (dev/testing)
+  (globalThis as any)?.AUTH_BASE_URL ??
+  // allow configuring via app.config.js / app.json extra
+  (Constants?.expoConfig?.extra?.AUTH_BASE_URL as string | undefined) ??
   DEFAULT_BASE;
 
+/** =========================
+ * Public types
+ * ========================= */
+export type MeScope = "BASIC" | "FULL";
+
 export type AuthCredentials = {
-  identifier: string;
-  password?: string;
+  identifier: string; // email or phone
+  password: string;
+  securityCode?: string | null; // optional second factor / future use
 };
 
 export type LoginResult = {
   success: boolean;
-  user?: any;
-  token?: string;
-  error?: string;
+  sessionId?: string; // JWS.* token returned by backend
+  token?: string;     // if backend also returns a token field
+  errorCode?: string;
+  message?: string;
+  error?: string;     // normalized alias of message/error for caller convenience
+  [k: string]: any;   // allow backend to return extra fields
 };
 
-const AUTH_TOKEN_KEY = "@gita:auth_token";
+/** =========================
+ * Internal helpers
+ * ========================= */
+function rid(len = 8): string {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let out = "";
+  for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return out;
+}
 
-async function fetchJson<T = any>(
-  path: string,
-  opts: RequestInit = {}
-): Promise<{ ok: boolean; status: number; json?: T; error?: string }> {
-  const url = path.startsWith("http") ? path : `${BASE}${path}`;
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(opts.headers as Record<string, string>),
-  };
-
+async function safeJson(res: Response): Promise<any | null> {
   try {
-    const token = await getAuthToken();
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-  } catch {
-    /* ignore */
-  }
-
-  const init: RequestInit = { ...opts, headers };
-
-  try {
-    const res = await fetch(url, init);
     const text = await res.text();
-    let json: any;
-    try {
-      json = text ? JSON.parse(text) : undefined;
-    } catch {
-      json = undefined;
-    }
-    return {
-      ok: res.ok,
-      status: res.status,
-      json,
-      error: res.ok ? undefined : (json as any)?.error ?? text,
-    };
-  } catch (e: any) {
-    return { ok: false, status: 0, json: undefined, error: e?.message ?? "Network error" };
-  }
-}
-
-export async function login(creds: AuthCredentials): Promise<LoginResult> {
-  if ((globalThis as any).__DEV_MOCK_AUTH) {
-    await new Promise((r) => setTimeout(r, 500));
-    return {
-      success: true,
-      user: { id: "mock", name: "Demo User", identifier: creds.identifier },
-      token: "mock-token",
-    };
-  }
-
-  const { ok, json, error } = await fetchJson<{ success?: boolean; user?: any; token?: string }>(
-    "/login",
-    {
-      method: "POST",
-      body: JSON.stringify(creds),
-    }
-  );
-
-  if (!ok) {
-    return { success: false, error: error ?? "Login failed" };
-  }
-
-  const user = (json as any)?.user ?? null;
-  const token = (json as any)?.token;
-
-  return {
-    success: (json as any)?.success ?? true,
-    user,
-    token,
-    error: undefined,
-  };
-}
-
-export async function signup(creds: AuthCredentials): Promise<LoginResult> {
-  const { ok, json, error } = await fetchJson<{ success?: boolean; user?: any; token?: string }>(
-    "/signup",
-    {
-      method: "POST",
-      body: JSON.stringify(creds),
-    }
-  );
-
-  if (!ok) return { success: false, error: error ?? "Signup failed" };
-
-  return {
-    success: (json as any)?.success ?? true,
-    user: (json as any)?.user,
-    token: (json as any)?.token,
-  };
-}
-
-export async function forgotPassword(identifier: string): Promise<{ success: boolean; error?: string }> {
-  const { ok, json, error } = await fetchJson<{ success?: boolean; message?: string; error?: string }>(
-    "/forgot-password",
-    {
-      method: "POST",
-      body: JSON.stringify({ identifier }),
-    }
-  );
-
-  if (!ok) return { success: false, error: error ?? "Forgot password failed" };
-
-  return {
-    success: (json as any)?.success ?? true,
-    error: (json as any)?.error,
-  };
-}
-
-export async function setAuthToken(token?: string | null): Promise<void> {
-  if (!token) {
-    await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
-  } else {
-    await AsyncStorage.setItem(AUTH_TOKEN_KEY, token);
-  }
-}
-
-export async function getAuthToken(): Promise<string | null> {
-  try {
-    return (await AsyncStorage.getItem(AUTH_TOKEN_KEY)) ?? null;
+    return text ? JSON.parse(text) : null;
   } catch {
     return null;
   }
 }
 
-export async function clearAuthToken(): Promise<void> {
-  await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+function joinUrl(base: string, path: string): string {
+  if (path.startsWith("http")) return path;
+  const slash = path.startsWith("/") ? "" : "/";
+  return `${base}${slash}${path}`;
 }
 
-export default {
+/** =========================
+ * Low-level HTTP
+ * ========================= */
+export async function postJson<T = any>(path: string, body?: any, headers?: Record<string, string>): Promise<{
+  ok: boolean;
+  status: number;
+  json: T | null;
+}> {
+  const url = joinUrl(AUTH_BASE, path);
+  const reqId = rid();
+  const previewBody =
+    body && typeof body === "object"
+      ? JSON.stringify({
+          ...body,
+          ...(body.password ? { password: "•••" } : {}),
+        })
+      : undefined;
+
+  console.debug(`[authApi:${reqId}] fetch: POST ${url} bodyPreview: ${previewBody ?? "null"}`);
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(headers ?? {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const json = await safeJson(res);
+  console.debug(
+    `[authApi:${reqId}] response ${res.status} preview: ${
+      json ? JSON.stringify(truncateForLog(json)) : "null"
+    }`
+  );
+
+  return { ok: res.ok, status: res.status, json: (json as T) ?? null };
+}
+
+export async function getJson<T = any>(path: string, headers?: Record<string, string>): Promise<{
+  ok: boolean;
+  status: number;
+  json: T | null;
+}> {
+  const url = joinUrl(AUTH_BASE, path);
+  const reqId = rid();
+
+  console.debug(`[authApi:${reqId}] fetch: GET ${url}`);
+  if (headers?.Authorization) {
+    console.debug("[authApi] auth header (preview):", previewAuth(headers.Authorization));
+  }
+
+  const res = await fetch(url, { method: "GET", headers });
+  const json = await safeJson(res);
+
+  console.debug(
+    `[authApi:${reqId}] response ${res.status} preview: ${
+      json ? JSON.stringify(truncateForLog(json)) : "null"
+    }`
+  );
+
+  return { ok: res.ok, status: res.status, json: (json as T) ?? null };
+}
+
+// small helper: avoid dumping huge blobs to the console
+function truncateForLog(v: any): any {
+  try {
+    const s = JSON.stringify(v);
+    if (s.length > 400) return JSON.parse(s.slice(0, 400) + '…"');
+  } catch {
+    /* ignore */
+  }
+  return v;
+}
+
+function previewAuth(token: string): string {
+  if (!token) return "(empty)";
+  return token.length <= 12 ? token : token.slice(0, 12) + "…";
+}
+
+/** =========================
+ * High-level API
+ * ========================= */
+
+/** POST /login  ->  { success, sessionId, token, ... } */
+export async function login(creds: AuthCredentials): Promise<LoginResult> {
+  // Backend expects { identifier, password, securityCode? }
+  const r = await postJson<any>("/login", creds);
+
+  if (!r.ok) {
+    const msg = (r.json as any)?.message || (r.json as any)?.error || `HTTP ${r.status}`;
+    return {
+      success: false,
+      errorCode: (r.json as any)?.errorCode,
+      message: msg,
+      error: msg,
+      status: r.status,
+    };
+  }
+
+  const data = (r.json as any) ?? {};
+  const sessionId: string | undefined = data.sessionId ?? data.token ?? undefined;
+  const msg: string | undefined = data.message ?? data.error ?? undefined;
+
+  console.debug("[authApi] login ok:", {
+    success: true,
+    hasSessionId: !!sessionId,
+  });
+
+  return {
+    success: data.success ?? !!sessionId,
+    sessionId,
+    token: data.token,
+    errorCode: data.errorCode,
+    message: msg,
+    error: msg, // normalized alias so callers using `res.error` keep working
+    ...data,
+  };
+}
+
+/** GET /me?scope=MIN|FULL (Authorization header carries raw sessionId) */
+export async function getMe(scope: MeScope = "FULL", sessionId?: string): Promise<{
+  success: boolean;
+  user?: any;
+  status?: number;
+  error?: string;
+}> {
+  const qs = `?scope=${encodeURIComponent(scope)}`;
+  const headers: Record<string, string> = {};
+  if (sessionId) headers.Authorization = sessionId;
+
+  console.debug("[authApi] GET ->", joinUrl(AUTH_BASE, `/me${qs}`));
+  const r = await getJson<any>(`/me${qs}`, headers);
+
+  if (!r.ok) {
+    const msg = (r.json as any)?.message || (r.json as any)?.error || `HTTP ${r.status}`;
+    return { success: false, status: r.status, error: msg };
+  }
+
+  // Expecting { success: boolean, user: { ... } }
+  return (r.json as any) ?? { success: false, error: "Empty response" };
+}
+
+/** POST /forgot-password */
+export async function forgotPassword(identifier: string): Promise<{
+  success: boolean;
+  status?: number;
+  error?: string;
+}> {
+  const r = await postJson<any>("/forgotPassword", { identifier });
+
+  if (!r.ok) {
+    const msg = (r.json as any)?.message || (r.json as any)?.error || `HTTP ${r.status}`;
+    return { success: false, status: r.status, error: msg };
+  }
+
+  const data = (r.json as any) ?? {};
+  return {
+    success: data.success ?? true,
+    ...(data ?? {}),
+  };
+}
+
+/** =========================
+ * Default export (object style)
+ * ========================= */
+const authApi = {
+  AUTH_BASE,
   login,
-  signup,
+  getMe,
   forgotPassword,
-  setAuthToken,
-  getAuthToken,
-  clearAuthToken,
+  postJson,
+  getJson,
 };
+
+export default authApi;

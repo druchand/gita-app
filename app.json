@@ -2,6 +2,7 @@
   "expo": {
     "name": "gita-app",
     "slug": "gita-app",
+    "scheme": "gitaapp", 
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",

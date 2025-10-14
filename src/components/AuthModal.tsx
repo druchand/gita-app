@@ -1,88 +1,110 @@
-// app/components/AuthModal.tsx
-import { useAuthModal } from "@/context/AuthModalContext";
-import React, { useState } from "react";
+// src/components/AuthModal.tsx
+import React, { useCallback, useState } from "react";
 import { ActivityIndicator, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-export default function AuthModal(): React.ReactElement | null {
-  const { open, setOpen, login, loading } = useAuthModal();
+// Defensive - prefer named useAuth hook; if not available, try default import
+let useAuthHook: (() => any) | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const authModule = require("../context/AuthModalContext");
+  if (typeof authModule.useAuth === "function") useAuthHook = authModule.useAuth;
+} catch (e) {
+  // ignore - context might not be present in some setups
+}
 
-  const [identifier, setIdentifier] = useState<string>("");
-  const [password, setPassword] = useState<string>("");
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+export type AuthModalProps = {
+  visible?: boolean;
+  onClose?: () => void;
+};
 
-  if (!open) return null;
+export default function AuthModal(props: AuthModalProps): React.ReactElement | null {
+  const insets = useSafeAreaInsets();
+  const auth = (typeof useAuthHook === "function" ? useAuthHook() : null) ?? null;
 
-  const onSubmit = async () => {
-    setError(null);
-    if (!identifier) {
-      setError("Please enter email or phone");
-      return;
-    }
-    if (!password) {
-      setError("Please enter password");
-      return;
-    }
-    setSubmitting(true);
+  const visible = props.visible ?? Boolean(auth?.openLoginVisible ?? auth?.visible ?? auth?.isOpen ?? false);
+  const onClose =
+    props.onClose ??
+    (() => {
+      if (auth) {
+        if (typeof auth.closeLogin === "function") return auth.closeLogin();
+        if (typeof auth.close === "function") return auth.close();
+        if (typeof auth.setOpen === "function") return auth.setOpen(false);
+      }
+    });
+
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const doLogin = useCallback(async () => {
+    setLoading(true);
+    setErrorMsg(null);
     try {
-      await login({identifier, password});
-      // provider will close modal (setOpen(false)) on success
+      if (auth && typeof auth.login === "function") {
+        const r = await auth.login(identifier, password);
+        // some login APIs return { success: true } others return token — we keep defensive
+        if (r && (r.success === false || r.error)) {
+          setErrorMsg(r.message ?? r.error ?? "Login failed");
+          setLoading(false);
+          return;
+        }
+      } else {
+        // If no auth hook available we still allow consumer-provided onClose to close the modal
+        console.debug("[AuthModal] no auth.login available; calling onClose");
+      }
+      // close on success
+      onClose && onClose();
     } catch (err: any) {
-      console.warn("login error", err);
-      const msg = err?.body?.message ?? err?.message ?? "Login failed";
-      setError(msg);
+      console.error("[AuthModal] login error", err);
+      setErrorMsg(err?.message ?? String(err ?? "Login failed"));
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
-  };
+  }, [auth, identifier, password, onClose]);
 
   return (
-    <Modal transparent visible animationType="fade" onRequestClose={() => setOpen(false)}>
-      <View style={styles.backdrop}>
-        <View style={styles.dialog}>
-          <Text style={styles.title}>Login</Text>
+    <Modal visible={Boolean(visible)} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.overlay}>
+        <View style={[styles.sheet, { marginTop: insets.top + 20 }]}>
+          <Text style={styles.title}>Sign in</Text>
 
-          <Text style={styles.label}>Email or phone</Text>
           <TextInput
+            placeholder="Email or username"
             style={styles.input}
-            placeholder="Email or phone"
             value={identifier}
             onChangeText={setIdentifier}
-            keyboardType="default"
+            keyboardType="email-address"
             autoCapitalize="none"
-            autoCorrect={false}
-            placeholderTextColor="#ccc"
           />
-
-          <Text style={[styles.label, { marginTop: 10 }]}>Password</Text>
           <TextInput
-            style={styles.input}
             placeholder="Password"
+            style={styles.input}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
-            placeholderTextColor="#ccc"
+            autoCapitalize="none"
           />
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          <TouchableOpacity style={styles.cta} onPress={onSubmit} disabled={submitting}>
-            {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.ctaText}>Login</Text>}
-          </TouchableOpacity>
+          {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
 
           <View style={styles.row}>
-            <TouchableOpacity onPress={() => { /* TODO: switch to signup UI */ }}>
-              <Text style={styles.link}>No account? Sign up</Text>
+            <TouchableOpacity style={styles.button} onPress={doLogin} disabled={loading}>
+              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Sign in</Text>}
             </TouchableOpacity>
 
-            <TouchableOpacity onPress={() => { /* TODO: Forgot password flow */ }}>
-              <Text style={[styles.link, { marginLeft: 12 }]}>Forgot Password?</Text>
+            <TouchableOpacity
+              style={[styles.button, styles.ghost]}
+              onPress={() => {
+                setIdentifier("");
+                setPassword("");
+                onClose && onClose();
+              }}
+            >
+              <Text style={[styles.btnText, { color: "#333" }]}>Cancel</Text>
             </TouchableOpacity>
           </View>
-
-          <TouchableOpacity style={styles.close} onPress={() => setOpen(false)}>
-            <Text style={{ fontSize: 20 }}>✕</Text>
-          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -90,40 +112,22 @@ export default function AuthModal(): React.ReactElement | null {
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    padding: 24,
-    justifyContent: "center",
-  },
-  dialog: {
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", justifyContent: "center", alignItems: "center" },
+  sheet: {
+    width: "86%",
     backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 20,
-    position: "relative",
-  },
-  title: { fontSize: 20, fontWeight: "700", marginBottom: 12 },
-  label: { fontSize: 13, color: "#333", marginBottom: 6 },
-  input: {
-    borderWidth: 1,
-    borderColor: "#eee",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 16,
-    color: "#111",
-    backgroundColor: "#fafafa",
-  },
-  cta: {
-    marginTop: 16,
-    backgroundColor: "#2f6fff",
-    paddingVertical: 12,
+    padding: 16,
     borderRadius: 10,
-    alignItems: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 12,
   },
-  ctaText: { color: "#fff", fontWeight: "700", fontSize: 16 },
-  row: { flexDirection: "row", justifyContent: "space-between", marginTop: 12 },
-  link: { color: "#2f6fff", fontWeight: "600" },
-  error: { color: "#c0392b", marginTop: 10 },
-  close: { position: "absolute", right: 8, top: 8 },
+  title: { fontSize: 18, fontWeight: "700", marginBottom: 10 },
+  input: { borderWidth: 1, borderColor: "#eee", borderRadius: 8, padding: 10, marginBottom: 10 },
+  row: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
+  button: { backgroundColor: "#2B79FF", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 },
+  ghost: { backgroundColor: "#f2f2f2" },
+  btnText: { color: "#fff", fontWeight: "600" },
+  error: { color: "red", marginBottom: 8 },
 });

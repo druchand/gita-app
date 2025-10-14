@@ -5,7 +5,7 @@ import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 type Option = { code: string; name: string };
 
-export default function DropdownPicker() : React.ReactElement {
+export default function DropdownPicker(): JSX.Element {
   const langCtx = useLanguage();
   const lang = langCtx?.lang;
   // prefer setLangCode, then setLang, then setLanguage (defensive)

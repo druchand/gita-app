@@ -1,22 +1,38 @@
 {
-    "cli": { "version": ">= 8.0.0" },
-      "build": {
-        "production": {
-          "android": { "gradleCommand": ":app:bundleRelease" },
-          "ios": { "simulator": false }
-        },
-        "simulator": {
-              "ios": { "simulator": true }
-            },
-    "preview": {
-          "android": { "buildType": "apk" },
-          "ios": { "simulator": true }
-        },
-    "production": {
-      "autoIncrement": true
+  "expo": {
+    "name": "gita-app",
+    "slug": "gita-app",
+    "scheme": "gitaapp",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "userInterfaceStyle": "light",
+    "jsEngine": "jsc",
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.anonymous.gitaapp"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.gitaapp"
+    },
+    "web": {
+      "favicon": "./assets/images/favicon.png"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "plugins": [
+      "expo-secure-store"
+    ],
+    "extra": {
+      "AUTH_BASE_URL": "https://eq21.co.in/_functions"
     }
-  },
-  "submit": {
-    "production": {}
   }
 }

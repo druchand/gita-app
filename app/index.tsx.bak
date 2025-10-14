@@ -4,7 +4,7 @@ import { useRouter } from "expo-router";
 import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
-export default function HomeIndex() : React.ReactElement {
+export default function HomeIndex(): JSX.Element {
   const { lang } = useLanguage();
   const router = useRouter();
 

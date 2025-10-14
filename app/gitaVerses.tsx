@@ -17,7 +17,7 @@ import {
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 
-type Translation = { lang?: string; text?: string; audioUrl?: string };
+type Translation = { lang?: string; text?: string; narration?: string };
 type Verse = {
   id?: string;
   verse?: number;
@@ -281,7 +281,7 @@ export default function GitaVersesScreen({ navigation }: any) {
           <View style={styles.row}>
             <TouchableOpacity
               style={styles.iconButton}
-              onPress={() => loadAndToggleAudio(t?.audioUrl ?? null, "recite", item.verse)}
+              onPress={() => loadAndToggleAudio(t?.narration ?? null, "recite", item.verse)}
             >
               <Text style={styles.iconText}>{isCurrentRecite ? "⏸" : "▶"}</Text>
             </TouchableOpacity>

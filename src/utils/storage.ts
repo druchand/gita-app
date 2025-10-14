@@ -1,32 +1,39 @@
-// utils/storage.ts
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// src/utils/storage.ts
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const LAST_VISIT_KEY = 'eq21:lastVisit:v1';
+async function setItem(key: string, value: string): Promise<void> {
+  await AsyncStorage.setItem(key, value);
+}
+async function getItem(key: string): Promise<string | null> {
+  return AsyncStorage.getItem(key);
+}
+async function removeItem(key: string): Promise<void> {
+  await AsyncStorage.removeItem(key);
+}
+async function clear(): Promise<void> {
+  await AsyncStorage.clear();
+}
 
-export type LastVisit = {
-  chapterId: string;   // e.g. "2"
-  shloka: string;      // e.g. "12"
-  lang?: string | null; // optional current language key, e.g. "hi" / "en"
+const storage = {
+  setItem,
+  getItem,
+  removeItem,
+  clear,
 };
 
-// Save last visited
-export async function setLastVisit(v: LastVisit) {
-  try {
-    await AsyncStorage.setItem(LAST_VISIT_KEY, JSON.stringify(v));
-  } catch {}
+export default storage;
+export { clear, getItem, removeItem, setItem };
+// Session-specific helpers
+const SESSION_KEY = "sessionId";
+
+export async function setSessionToken(token: string): Promise<void> {
+  await setItem(SESSION_KEY, token);
 }
 
-// Read last visited (or null)
-export async function getLastVisit(): Promise<LastVisit | null> {
-  try {
-    const raw = await AsyncStorage.getItem(LAST_VISIT_KEY);
-    return raw ? (JSON.parse(raw) as LastVisit) : null;
-  } catch {
-    return null;
-  }
+export async function getSessionToken(): Promise<string | null> {
+  return getItem(SESSION_KEY);
 }
 
-// Optional: clear
-export async function clearLastVisit() {
-  try { await AsyncStorage.removeItem(LAST_VISIT_KEY); } catch {}
+export async function clearSessionToken(): Promise<void> {
+  await removeItem(SESSION_KEY);
 }

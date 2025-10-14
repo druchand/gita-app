@@ -3,7 +3,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
-export default function HumanDilemma() : React.ReactElement {
+export default function HumanDilemma(): JSX.Element {
   const { lang } = useLanguage();
 
   // normalize lang and derive langName defensively

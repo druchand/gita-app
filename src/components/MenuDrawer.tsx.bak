@@ -1,0 +1,371 @@
+// src/components/MenuDrawer.tsx
+import { useAuth } from "@/context/AuthModalContext"; // adjust if your hook name differs
+import { useLanguage } from "@/context/LanguageContext";
+import { useRouter } from "expo-router";
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Animated,
+  Dimensions,
+  Easing,
+  LayoutChangeEvent,
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+
+export type MenuItem = {
+  key: string;
+  label: string | Record<string, string>; // either string or object keyed by lang code
+  to?: string; // route path
+  authRequired?: boolean;
+  icon?: string; // optional icon name — just metadata here
+};
+
+export type MenuDrawerContextValue = {
+  openMenu: () => void;
+  closeMenu: () => void;
+  toggleMenu: () => void;
+  isOpen: boolean;
+  openLanguage: () => void;
+  closeLanguage: () => void;
+  toggleLanguage: () => void;
+  isLanguageOpen: boolean;
+};
+
+const DEFAULT_MENU: MenuItem[] = [
+  { key: "home", label: { EN: "Home", HI: "होम" }, to: "/" },
+  { key: "human-dilemma", label: { EN: "Human Dilemma", HI: "मानव द्वंद्व" }, to: "/human-dilemma", authRequired: true },
+  { key: "about", label: { EN: "About", HI: "परिचय" }, to: "/about" },
+  { key: "visit", label: { EN: "Visit website", HI: "वेबसाइट देखें" }, to: "https://eq21.co.in" },
+];
+
+const MenuDrawerContext = React.createContext<MenuDrawerContextValue | null>(null);
+
+export const useMenuDrawer = () => {
+  const ctx = useContext(MenuDrawerContext);
+  if (!ctx) {
+    // return a safe fallback so callers don't always have to null-check
+    return {
+      openMenu: () => {},
+      closeMenu: () => {},
+      toggleMenu: () => {},
+      isOpen: false,
+      openLanguage: () => {},
+      closeLanguage: () => {},
+      toggleLanguage: () => {},
+      isLanguageOpen: false,
+    };
+  }
+  return ctx;
+};
+
+export const MenuDrawerProvider: React.FC<{ children: React.ReactNode; anchorTop?: number }> = ({
+  children,
+  anchorTop = 0,
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isLanguageOpen, setIsLanguageOpen] = useState(false);
+
+  // measured heights so that drawer can be sized to content (dynamic)
+  const [menuContentHeight, setMenuContentHeight] = useState(0);
+  const [langContentHeight, setLangContentHeight] = useState(0);
+
+  const screenW = Dimensions.get("window").width;
+  const screenH = Dimensions.get("window").height;
+  const drawerWidth = Math.min(360, Math.round(screenW * 0.86));
+
+  const slideAnim = useRef(new Animated.Value(-drawerWidth)).current; // for left menu
+  const langSlideAnim = useRef(new Animated.Value(screenW)).current; // for right language drawer (off-screen to right)
+
+  const router = useRouter();
+  const auth = useAuth(); // may be null/fallback depending on your implementation
+  const languageCtx = useLanguage();
+
+  // open/close animations
+  const openMenu = useCallback(() => {
+    setIsOpen(true);
+    Animated.timing(slideAnim, {
+      toValue: 0,
+      duration: 300,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [slideAnim]);
+
+  const closeMenu = useCallback(() => {
+    Animated.timing(slideAnim, {
+      toValue: -drawerWidth,
+      duration: 240,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => setIsOpen(false));
+  }, [slideAnim, drawerWidth]);
+
+  const toggleMenu = useCallback(() => {
+    if (isOpen) closeMenu();
+    else openMenu();
+  }, [isOpen, openMenu, closeMenu]);
+
+  const openLanguage = useCallback(() => {
+    setIsLanguageOpen(true);
+    Animated.timing(langSlideAnim, {
+      toValue: screenW - drawerWidth,
+      duration: 300,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [langSlideAnim, drawerWidth, screenW]);
+
+  const closeLanguage = useCallback(() => {
+    Animated.timing(langSlideAnim, {
+      toValue: screenW,
+      duration: 240,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(() => setIsLanguageOpen(false));
+  }, [langSlideAnim, screenW]);
+
+  const toggleLanguage = useCallback(() => {
+    if (isLanguageOpen) closeLanguage();
+    else openLanguage();
+  }, [isLanguageOpen, closeLanguage, openLanguage]);
+
+  // expose context value
+  const ctxValue = useMemo(
+    () => ({
+      openMenu,
+      closeMenu,
+      toggleMenu,
+      isOpen,
+      openLanguage,
+      closeLanguage,
+      toggleLanguage,
+      isLanguageOpen,
+    }),
+    [openMenu, closeMenu, toggleMenu, isOpen, openLanguage, closeLanguage, toggleLanguage, isLanguageOpen]
+  );
+
+  // When menu opens, optionally close language, and vice versa
+  useEffect(() => {
+    if (isOpen && isLanguageOpen) {
+      // close language drawer if menu opens
+      closeLanguage();
+    }
+  }, [isOpen, isLanguageOpen, closeLanguage]);
+
+  useEffect(() => {
+    if (isLanguageOpen && isOpen) {
+      closeMenu();
+    }
+  }, [isLanguageOpen, isOpen, closeMenu]);
+
+  // handle taps outside the drawer to close
+  const onBackdropPress = useCallback(() => {
+    if (isOpen) closeMenu();
+    if (isLanguageOpen) closeLanguage();
+  }, [isOpen, isLanguageOpen, closeMenu, closeLanguage]);
+
+  // click handler for menu items
+  const handleMenuItemPress = useCallback(
+    (item: MenuItem) => {
+      // if route is external (starts with http), open in browser using Linking
+      if (item.to && item.to.startsWith("http")) {
+        // lazy import to avoid unnecessary bundle size
+        import("react-native").then(({ Linking }) => {
+          Linking.openURL(item.to!);
+        });
+        closeMenu();
+        return;
+      }
+      if (item.to) {
+        router.push(item.to);
+        closeMenu();
+      }
+    },
+    [router, closeMenu]
+  );
+
+  // sample menu items — in your app you might want to read from a JSON or context
+  const menuItems = DEFAULT_MENU;
+
+  // helper to compute label by language
+  const labelFor = useCallback(
+    (label: string | Record<string, string>) => {
+      if (typeof label === "string") return label;
+      const lang = (languageCtx?.lang ?? "EN") as string;
+      return label[lang] ?? label["EN"] ?? Object.values(label)[0] ?? "";
+    },
+    [languageCtx?.lang]
+  );
+
+  // measurements
+  const onMenuLayout = useCallback((e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    setMenuContentHeight(h);
+  }, []);
+  const onLangLayout = useCallback((e: LayoutChangeEvent) => {
+    const h = e.nativeEvent.layout.height;
+    setLangContentHeight(h);
+  }, []);
+
+  // render
+  return (
+    <MenuDrawerContext.Provider value={ctxValue}>
+      {/* Render children normally. Do NOT clone or treat children as a ReactElement */}
+      <View style={{ flex: 1 }}>{children}</View>
+
+      {/* Backdrop: shown when either drawer is open */}
+      {(isOpen || isLanguageOpen) && (
+        <Pressable
+          onPress={onBackdropPress}
+          style={[
+            styles.backdrop,
+            {
+              top: anchorTop,
+              height: screenH - anchorTop,
+            },
+          ]}
+        />
+      )}
+
+      {/* Left Menu Drawer */}
+      <Animated.View
+        pointerEvents={isOpen ? "auto" : "none"}
+        style={[
+          styles.drawer,
+          {
+            width: drawerWidth,
+            left: 0,
+            top: anchorTop,
+            // slide using translateX
+            transform: [{ translateX: slideAnim }],
+            // dynamic height: enough to hold content; default to full remaining screen
+            height: menuContentHeight > 0 ? menuContentHeight : screenH - anchorTop,
+          },
+        ]}
+      >
+        <View onLayout={onMenuLayout} style={styles.menuContent}>
+          <Text style={styles.menuTitle}>Menu</Text>
+
+          {menuItems.map((item) => {
+            // hide auth-only items when not logged in
+            if (item.authRequired && !auth?.user?.loggedIn) return null;
+            const label = labelFor(item.label);
+            return (
+              <TouchableOpacity key={item.key} onPress={() => handleMenuItemPress(item)} style={styles.menuItem}>
+                <Text style={styles.menuItemText}>{label}</Text>
+              </TouchableOpacity>
+            );
+          })}
+
+          {/* optional sign in / sign out */}
+          {!auth?.user?.loggedIn ? (
+            <TouchableOpacity
+              key="menu-signin"
+              onPress={() => {
+                // open login if available on auth context
+                if (auth && typeof auth.openLogin === "function") auth.openLogin();
+                closeMenu();
+              }}
+              style={styles.menuItem}
+            >
+              <Text style={styles.menuItemText}>Sign in</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              key="menu-signout"
+              onPress={() => {
+                if (auth && typeof auth.signOut === "function") auth.signOut();
+                closeMenu();
+              }}
+              style={styles.menuItem}
+            >
+              <Text style={styles.menuItemText}>Sign out</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </Animated.View>
+
+      {/* Right Language Drawer */}
+      <Animated.View
+        pointerEvents={isLanguageOpen ? "auto" : "none"}
+        style={[
+          styles.drawer,
+          {
+            width: drawerWidth,
+            right: 0,
+            top: anchorTop,
+            transform: [{ translateX: langSlideAnim }],
+            height: langContentHeight > 0 ? langContentHeight : screenH - anchorTop,
+            // place it on top of other content
+            backgroundColor: "#fff",
+          },
+        ]}
+      >
+        <View onLayout={onLangLayout} style={styles.menuContent}>
+          <Text style={styles.menuTitle}>Language</Text>
+          {/* If you already have a LanguageModal component, you can render it here or replicate UI */}
+          {/* For now show simple list from language context if present */}
+          {(languageCtx?.availableLangs ?? ["EN", "HI"]).map((l: any, idx: number) => {
+            const code = typeof l === "string" ? l : l.code ?? l.lang ?? l.id ?? `lang-${idx}`;
+            const name = typeof l === "string" ? l : l.name ?? l.label ?? code;
+            return (
+              <TouchableOpacity
+                key={String(code)}
+                onPress={() => {
+                  if (typeof languageCtx?.setLangCode === "function") languageCtx.setLangCode(String(code));
+                  closeLanguage();
+                }}
+                style={styles.menuItem}
+              >
+                <Text style={styles.menuItemText}>
+                  {String(code).toUpperCase()} — {name}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </Animated.View>
+    </MenuDrawerContext.Provider>
+  );
+};
+
+const styles = StyleSheet.create({
+  backdrop: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    zIndex: 999,
+  },
+  drawer: {
+    position: "absolute",
+    zIndex: 1000,
+    backgroundColor: "#fff",
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 12,
+  },
+  menuContent: {
+    padding: 12,
+  },
+  menuTitle: {
+    fontWeight: "700",
+    fontSize: 16,
+    marginBottom: 8,
+  },
+  menuItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+    borderRadius: 6,
+  },
+  menuItemText: {
+    fontSize: 15,
+  },
+});
+
+export { MenuDrawerProvider };
+export default MenuDrawerProvider;
