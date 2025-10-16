@@ -20,8 +20,24 @@ export default function ForgotPasswordModal(): React.ReactElement | null {
     setMsg(null);
     setLoading(true);
     try {
-      await auth.forgotPassword(identifier.trim());
-      setMsg("If that account exists, a reset link has been sent.");
+      // defensive check: ensure auth and the method exist before calling
+      if (!auth || typeof (auth as any).forgotPassword !== "function") {
+        throw new Error("Forgot password action not available");
+      }
+
+      // call the provider method; handle common returned shapes
+      const result = await (auth as any).forgotPassword(identifier.trim());
+
+      // if result is an object with success/message, use it; otherwise show a generic message
+      if (result && typeof result === "object") {
+        if (result.success === false) {
+          setMsg(result.message ?? result.error ?? "Unable to process request");
+        } else {
+          setMsg(result.message ?? "If that account exists, a reset link has been sent.");
+        }
+      } else {
+        setMsg("If that account exists, a reset link has been sent.");
+      }
     } catch (err: any) {
       setMsg(err?.message ?? "Unable to process request");
     } finally {

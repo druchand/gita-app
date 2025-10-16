@@ -1,202 +1,395 @@
 // app/gitaHome.tsx
-import CollapsibleText from "@/components/CollapsibleText"; // existing component
 import { useLanguage } from "@/context/LanguageContext";
-import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 
-type ChapterItem = { chapter: number; title?: string };
-type AppHomeData = {
+type Block = {
+  id?: string;
   title?: string;
-  image?: string | null;
-  description?: string | null;
-  chapters?: ChapterItem[];
-  lang?: string;
+  image?: string;
+  description?: string;
+  action?: { type?: string; target?: string };
 };
 
-const BASE = (globalThis as any)?.AUTH_BASE_URL ?? "https://eq21.co.in";
+const CACHE_KEY_PREFIX = "gita:home:"; // + lang
+const FETCH_TIMEOUT_MS = 15000;
 
 export default function GitaHome(): React.ReactElement {
   const router = useRouter();
-  // ensure default "EN" if language provider returns null
-  const languageCtx = useLanguage?.();
-  const lang = (languageCtx?.lang ?? "EN") as string;
+  const params = useLocalSearchParams();
+  const { lang: ctxLang } = useLanguage();
 
-  const [loading, setLoading] = useState<boolean>(true);
+  const queryLang = typeof params?.lang === "string" ? params.lang : undefined;
+  const safeLang = queryLang ?? (typeof ctxLang === "string" ? ctxLang : (ctxLang && (ctxLang as any).code) ?? "EN");
+
+  const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<AppHomeData | null>(null);
+  const [payload, setPayload] = useState<any | null>(null);
+  const [imageErrorIds, setImageErrorIds] = useState<Record<string, boolean>>({});
 
-  useEffect(() => {
-    let mounted = true;
-    const url = `${BASE}/_functions/gitaHome?lang=${encodeURIComponent(String(lang ?? "EN"))}`;
-    console.debug("[gitaHome] fetch ->", url);
+  const cacheKey = `${CACHE_KEY_PREFIX}${safeLang}`;
 
-    (async () => {
+  // normalization: unwrap many possible backend shapes
+  const normalizePayload = (raw: any) => {
+    if (!raw) return null;
+    // common wrappers:
+    // { success: true, data: {...} }
+    if (raw.success && raw.data) return raw.data;
+    // { success: true, body: {...} } (some frameworks)
+    if (raw.success && raw.body) {
+      // some backends nest again: { body: { body: {...} } }
+      if (raw.body.body) return raw.body.body;
+      return raw.body;
+    }
+    // direct body: { lang, blocks }
+    if (raw.lang || raw.blocks) return raw;
+    // other wrappers: { body: { lang... } }
+    if (raw.body && (raw.body.lang || raw.body.blocks)) return raw.body;
+    // fallback to raw
+    return raw;
+  };
+
+  const restoreFromCache = useCallback(async () => {
+    try {
+      const cached = await AsyncStorage.getItem(cacheKey);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        console.debug("[gitaHome] using cached payload for", safeLang);
+        setPayload(parsed);
+        setError(null);
+        return true;
+      }
+    } catch (err) {
+      console.warn("[gitaHome] failed to restore cache", err);
+    }
+    return false;
+  }, [cacheKey, safeLang]);
+
+  const persistToCache = useCallback(
+    async (data: any) => {
       try {
-        const res = await fetch(url, { method: "GET" });
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(data));
+        console.debug("[gitaHome] cached payload for", safeLang);
+      } catch (err) {
+        console.warn("[gitaHome] failed to persist cache", err);
+      }
+    },
+    [cacheKey, safeLang]
+  );
+
+  const fetchHome = useCallback(
+    async (suppliedLang?: string | null, { force = false }: { force?: boolean } = {}) => {
+      const finalLang = suppliedLang ?? safeLang ?? "EN";
+      const url = `https://eq21.co.in/_functions/AppHome?lang=${encodeURIComponent(finalLang)}`;
+
+      console.debug("[gitaHome] fetch ->", url, { force });
+      setLoading(true);
+      setError(null);
+
+      const controller = new AbortController();
+      const id = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+      try {
+        const res = await fetch(url, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+          },
+          cache: "no-store" as RequestCache,
+          signal: controller.signal,
+        });
+
+        clearTimeout(id);
+
         if (!res.ok) {
-          const txt = await res.text().catch(() => "");
-          console.debug("[gitaHome] fetch response not ok", res.status, txt);
-          if (!mounted) return;
-          setError(`Backend returned ${res.status}`);
-          setLoading(false);
+          const text = await res.text().catch(() => "");
+          console.warn("[gitaHome] fetch not ok", res.status, res.statusText, text?.slice?.(0, 200));
+          setError(`Server returned ${res.status}`);
+          // try cached fallback
+          const used = await restoreFromCache();
+          if (!used) setPayload(null);
           return;
         }
-        const json = await res.json().catch(() => null);
-        // console.debug("[gitaHome] fetch ok preview:", json);
-        if (!mounted) return;
 
-        // Normalize into our shape
-        const payload: AppHomeData = {
-          title: json?.title ?? json?.heading ?? "Gita",
-          image: json?.image ?? json?.cover ?? null,
-          description: json?.description ?? json?.desc ?? json?.summary ?? null,
-          chapters: (json?.chapters ?? json?.items ?? []) as ChapterItem[],
-          lang: json?.lang ?? lang,
-        };
-        setData(payload);
-        setLoading(false);
-      } catch (err) {
-        console.error("[gitaHome] fetch error", err);
-        if (!mounted) return;
-        // safe access to err.message
-        setError(String((err as any)?.message ?? err));
+        // Read as text then parse once (defensive)
+        const text = await res.text().catch((e) => {
+          console.warn("[gitaHome] failed to read text body", e);
+          return "";
+        });
+
+        if (!text) {
+          console.warn("[gitaHome] empty response body");
+          setError("Empty response from server");
+          const used = await restoreFromCache();
+          if (!used) setPayload(null);
+          return;
+        }
+
+        let json: any = null;
+        try {
+          json = JSON.parse(text);
+        } catch (err) {
+          // try res.json as a last resort (some servers may have different behavior)
+          try {
+            json = await (async () => {
+              try {
+                return await res.json();
+              } catch (e) {
+                return null;
+              }
+            })();
+            console.warn("[gitaHome] JSON.parse failed; used res.json fallback", err);
+          } catch (e) {
+            console.warn("[gitaHome] final json fallback failed", e);
+            json = null;
+          }
+        }
+
+        if (!json) {
+          console.warn("[gitaHome] no JSON parsed");
+          setError("Invalid JSON from server");
+          const used = await restoreFromCache();
+          if (!used) setPayload(null);
+          return;
+        }
+
+        const normalized = normalizePayload(json);
+        if (!normalized) {
+          console.warn("[gitaHome] normalized payload empty", Object.keys(json ?? {}));
+          setError("Unexpected payload shape");
+          const used = await restoreFromCache();
+          if (!used) setPayload(null);
+          return;
+        }
+
+        setPayload(normalized);
+        setError(null);
+
+        // persist best-effort
+        persistToCache(normalized);
+        console.debug("[gitaHome] loaded payload keys:", Object.keys(normalized ?? {}));
+      } catch (err: any) {
+        if (err?.name === "AbortError") {
+          console.warn("[gitaHome] fetch aborted (timeout)");
+          setError("Request timed out");
+        } else {
+          console.error("[gitaHome] fetchHome error", err);
+          setError(String(err?.message ?? err));
+        }
+        // fallback to cache
+        await restoreFromCache();
+      } finally {
+        clearTimeout(id);
         setLoading(false);
       }
-    })();
+    },
+    [normalizePayload, persistToCache, restoreFromCache, safeLang]
+  );
 
-    return () => {
-      mounted = false;
-    };
-  }, [lang]);
-  
-  function openChapter(chap: ChapterItem) {
-    const id = String(chap.chapter);
-    const route = `/chapter/${id}`;
-    console.debug("[gitaHome] navigate to chapter", id, "->", route);
-    try {
-      router.push(route);
-    } catch (err) {
-      console.error("[gitaHome] router.push failed", err);
-      Alert.alert("Navigation failed", String((err as any)?.message ?? err));
+  useEffect(() => {
+    fetchHome(safeLang);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [safeLang]);
+
+  // memoized blocks
+  const blocks: Block[] = useMemo(() => {
+    if (!payload) return [];
+    return Array.isArray(payload.blocks) ? payload.blocks : [];
+  }, [payload]);
+
+  const handleAction = (action?: { type?: string; target?: string }) => {
+    if (!action) return;
+    if (action.type === "navigate" && action.target) {
+      try {
+        router.push(action.target);
+      } catch (err) {
+        console.warn("[gitaHome] router.push failed", err);
+        Alert.alert("Unable to navigate", action.target);
+      }
+      return;
     }
-  }
+    if (action.type === "external" && action.target) {
+      // open external url
+      try {
+        // Note: Linking.openURL can be used; keep simple for now:
+        // Linking.openURL(action.target);
+        Alert.alert("External", action.target);
+      } catch (err) {
+        console.warn("[gitaHome] open external failed", err);
+      }
+      return;
+    }
+    Alert.alert("Action", JSON.stringify(action));
+  };
 
-  if (loading) {
+  const onImageError = (id?: string) => {
+    if (!id) return;
+    setImageErrorIds((s) => ({ ...s, [id]: true }));
+  };
+
+  // UI states
+  if (loading && !payload) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" />
+        <Text style={{ marginTop: 10 }}>Loading content…</Text>
       </View>
     );
   }
 
-  if (error) {
+  if (error && !payload) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>Error: {error}</Text>
-      </View>
-    );
-  }
-
-  if (!data) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>No data</Text>
-      </View>
-    );
-  }
-
-  return (
-    <ScrollView style={styles.safe} contentContainerStyle={{ padding: 16 }}>
-      {/* Block 1: Hero */}
-      <View style={styles.block}>
-        <Text style={styles.blockTitle}>{data.title ?? "Bhagavad Gita"}</Text>
-
-        <TouchableOpacity
-          activeOpacity={0.8}
-          style={styles.imageWrap}
-          onPress={() => {
-            console.debug("[gitaHome] hero pressed - no-op currently");
-          }}
-        >
-          {data.image ? (
-            <Image source={{ uri: data.image }} style={styles.heroImage} />
-          ) : (
-            <View style={styles.imagePlaceholder}>
-              <Text style={styles.imagePlaceholderText}>Image</Text>
-            </View>
-          )}
+      <View style={styles.center}>
+        <Text style={{ color: "red", textAlign: "center" }}>Error: {error}</Text>
+        <TouchableOpacity onPress={() => fetchHome(safeLang, { force: true })} style={{ marginTop: 12 }}>
+          <Text style={{ color: "#007AFF" }}>Retry</Text>
         </TouchableOpacity>
-
-        {data.description ? (
-          <CollapsibleText text={data.description} numberOfLines={4} />
-        ) : null}
       </View>
+    );
+  }
 
-      {/* Block 2: Chapters Grid */}
-      <View style={styles.block}>
-        <Text style={styles.sectionTitle}>Chapters</Text>
-        <View style={styles.grid}>
-          {(data.chapters ?? []).map((c) => {
-            const idStr = String(c.chapter);
-            return (
-              <TouchableOpacity
-                key={idStr}
-                style={styles.chapterBtn}
-                onPress={() => openChapter(c)}
-              >
-                <Text style={styles.chapterBtnText}>
-                  {c.chapter}
-                  {c.title ? ` — ${c.title}` : ""}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-          {(!data.chapters || data.chapters.length === 0) && (
-            <Text style={styles.small}>No chapters available.</Text>
-          )}
+  if (!payload) {
+    return (
+      <View style={styles.center}>
+        <Text>No content available.</Text>
+        <TouchableOpacity onPress={() => fetchHome(safeLang, { force: true })} style={{ marginTop: 12 }}>
+          <Text style={{ color: "#007AFF" }}>Reload</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const pageTitle = payload.title ?? payload.langName ?? "Gita App";
+
+  const renderBlock = (b: Block, idx: number, hero = false) => {
+    const key = b.id ?? `block-${idx}`;
+    const failed = !!(b.id && imageErrorIds[b.id]);
+    return (
+      <View key={key} style={[styles.card, hero ? styles.heroCard : undefined]}>
+        {b.image && !failed ? (
+          <Image
+            source={{ uri: b.image }}
+            style={[styles.cardImage, hero ? styles.heroImage : undefined]}
+            resizeMode="cover"
+            onError={() => {
+              console.warn("[gitaHome] image load error", b.image);
+              onImageError(b.id);
+            }}
+          />
+        ) : (
+          <View style={[styles.cardImage, styles.cardImagePlaceholder, hero ? styles.heroImage : undefined]}>
+            <Text style={styles.placeholderText}>No image</Text>
+          </View>
+        )}
+
+        <View style={styles.cardBody}>
+          <Text style={[styles.cardTitle, hero ? styles.heroTitle : undefined]}>{b.title ?? "Untitled"}</Text>
+          {b.description ? <Text style={styles.cardDesc}>{b.description}</Text> : null}
+
+          {b.action?.type === "navigate" && b.action?.target ? (
+            <TouchableOpacity style={styles.actionBtn} onPress={() => handleAction(b.action)}>
+              <Text style={styles.actionText}>Open</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
+    );
+  };
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
+      <Text style={styles.title}>{pageTitle}</Text>
+
+      {blocks.length > 0 ? (
+        <View>
+          {renderBlock(blocks[0], 0, true)}
+          {blocks.slice(1).map((b, i) => renderBlock(b, i + 1, false))}
+        </View>
+      ) : (
+        <>
+          <View style={styles.emptyHero}>
+            <Text>Image placeholder</Text>
+          </View>
+          <Text style={styles.desc}>{payload?.description ?? "Welcome — content will be populated from backend."}</Text>
+        </>
+      )}
     </ScrollView>
   );
 }
 
+const win = Dimensions.get("window");
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#fff" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  container: { flex: 1, padding: 16 },
-  block: { marginBottom: 20 },
-  blockTitle: { fontSize: 20, fontWeight: "700", marginBottom: 12, textAlign: "center" },
-  imageWrap: { alignItems: "center", marginBottom: 12 },
-  heroImage: { width: "100%", height: 180, borderRadius: 8, resizeMode: "cover" },
-  imagePlaceholder: {
+  container: { flex: 1, backgroundColor: "#fff" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
+  title: { fontSize: 20, fontWeight: "700", alignSelf: "center", marginBottom: 12 },
+
+  emptyHero: { height: 200, backgroundColor: "#eee", borderRadius: 8, marginVertical: 12, alignItems: "center", justifyContent: "center" },
+  desc: { marginTop: 12, color: "#444", lineHeight: 20 },
+
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 10,
+    overflow: "hidden",
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#eee",
+    shadowColor: "#000",
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  heroCard: {},
+  cardImage: {
     width: "100%",
-    height: 180,
-    borderRadius: 8,
-    backgroundColor: "#eee",
+    height: Math.round(win.width * 0.45),
+    backgroundColor: "#ddd",
+  },
+  heroImage: {
+    height: Math.round(win.width * 0.55),
+  },
+  cardImagePlaceholder: {
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "#eee",
   },
-  imagePlaceholderText: { color: "#888" },
-  sectionTitle: { fontSize: 18, fontWeight: "600", marginBottom: 8 },
-  grid: { flexDirection: "row", flexWrap: "wrap" },
-  chapterBtn: {
+  placeholderText: {
+    color: "#666",
+  },
+  cardBody: {
     padding: 12,
-    backgroundColor: "#f5f5f5",
-    margin: 6,
-    borderRadius: 8,
-    minWidth: 110,
   },
-  chapterBtnText: { fontSize: 14 },
-  small: { color: "#666", marginTop: 8 },
-  errorText: { color: "red" },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  heroTitle: {
+    fontSize: 22,
+  },
+  cardDesc: {
+    color: "#444",
+    marginBottom: 12,
+  },
+  actionBtn: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: "#f0f0f0",
+    borderRadius: 6,
+  },
+  actionText: {
+    fontWeight: "600",
+  },
 });

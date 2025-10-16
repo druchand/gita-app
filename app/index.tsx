@@ -1,108 +1,73 @@
 // app/index.tsx
 import { useLanguage } from "@/context/LanguageContext";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 
-export default function HomeIndex() : React.ReactElement {
-  const { lang } = useLanguage();
+/**
+ * index.tsx (splash / routing)
+ *
+ * Purpose:
+ *  - Minimal entry page that ensures LanguageContext is available and hydrated,
+ *    normalizes language code and redirects to /gitaHome.
+ *
+ * Behavior:
+ *  - Uses router.replace('/gitaHome') so users don't navigate back to this splash.
+ *  - Shows a simple loading indicator while language is resolved.
+ *  - Logs the chosen language to Metro for easier debugging.
+ *
+ * Note:
+ *  - Keep this file lightweight; the heavy lifting + fetch should live in gitaHome.tsx.
+ */
+
+export default function Index(): React.ReactElement {
   const router = useRouter();
-
-  // normalize lang to code string
-  const safeLang = typeof lang === "string" ? lang : (lang && (lang as any).code) ?? "EN";
-
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [payload, setPayload] = useState<any>(null);
-
-  const fetchHome = useCallback(async (suppliedLang?: string | null) => {
-    const finalLang = suppliedLang ?? safeLang;
-    setLoading(true);
-    setError(null);
-    try {
-      const url = `https://eq21.co.in/_functions/AppHome?lang=${encodeURIComponent(finalLang)}`;
-      console.debug("[home/index] fetchHome ->", { safeLang: finalLang, url });
-      const res = await fetch(url);
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        setError(`HTTP ${res.status} ${text}`);
-        setPayload(null);
-      } else {
-        const json = await res.json().catch(() => null);
-        setPayload(json);
-      }
-    } catch (err: any) {
-      console.error("[home/index] fetchHome error", err);
-      setError(String(err?.message ?? err));
-      setPayload(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [safeLang]);
+  const { lang, availableLangs } = useLanguage();
+  const [navigated, setNavigated] = useState(false);
+  const mounted = useRef(true);
 
   useEffect(() => {
-    fetchHome();
-  }, [fetchHome]);
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
-  if (loading) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator />
-        <Text>Loading home…</Text>
-      </View>
-    );
-  }
+  useEffect(() => {
+    // Wait until language is available (LanguageProvider persists; if not, lang still has default)
+    // Normalize lang to a string code
+    const safeLang = typeof lang === "string" ? lang : (lang && (lang as any).code) ?? "EN";
+    console.debug("[index] resolved lang:", safeLang, "available:", (availableLangs || []).length);
 
-  if (error) {
-    return (
-      <View style={styles.center}>
-        <Text style={{ color: "red" }}>Error loading home: {error}</Text>
-        <TouchableOpacity onPress={() => fetchHome()}>
-          <Text style={{ color: "#007AFF", marginTop: 8 }}>Retry</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+    // Only navigate once
+    if (!navigated) {
+      setNavigated(true);
+      // Replace so splash isn't in history
+      try {
+        router.replace(`/gitaHome?lang=${encodeURIComponent(safeLang)}`);
+      } catch (err) {
+        console.warn("[index] router.replace failed:", err);
+        // fallback: push if replace fails
+        try {
+          router.push(`/gitaHome?lang=${encodeURIComponent(safeLang)}`);
+        } catch (e) {
+          console.error("[index] router.push failed too:", e);
+        }
+      }
+    }
+  }, [lang, availableLangs, navigated, router]);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
-      <Text style={styles.title}>{payload?.title ?? "Gita App"}</Text>
-      <View style={{ height: 200, backgroundColor: "#eee", borderRadius: 8, marginVertical: 12, alignItems: "center", justifyContent: "center" }}>
-        <Text>Image placeholder</Text>
+    <View style={styles.container}>
+      <View style={styles.center}>
+        <ActivityIndicator size="large" />
+        <Text style={styles.text}>Preparing Gita App…</Text>
       </View>
-
-      <Text style={styles.desc}>{payload?.description ?? "Welcome — content will be populated from backend."}</Text>
-
-      <View style={{ height: 16 }} />
-
-      <Text style={styles.sectionTitle}>Chapters</Text>
-      <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
-        {(payload?.chapters ?? []).map((ch: any, idx: number) => (
-          <TouchableOpacity
-            key={`ch-${idx}`}
-            style={styles.chapterBtn}
-            onPress={() => router.push(`/chapter/${ch.chapter ?? (idx + 1)}/${ch.chapter ?? (idx + 1)}`)}
-          >
-            <Text style={{ fontWeight: "600" }}>{ch.title ?? `Chapter ${ch.chapter ?? idx + 1}`}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff" },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
-  title: { fontSize: 20, fontWeight: "700", alignSelf: "center" },
-  desc: { marginTop: 12, color: "#444", lineHeight: 20 },
-  sectionTitle: { marginTop: 20, marginBottom: 8, fontWeight: "700" },
-  chapterBtn: {
-    width: "48%",
-    padding: 12,
-    margin: "1%",
-    backgroundColor: "#f5f5f5",
-    borderRadius: 8,
-    alignItems: "center",
-  },
+  text: { marginTop: 12, fontSize: 16, color: "#333" },
 });

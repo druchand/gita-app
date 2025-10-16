@@ -1,108 +1,137 @@
-// src/components/AuthModal.tsx
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-// Defensive - prefer named useAuth hook; if not available, try default import
-let useAuthHook: (() => any) | null = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const authModule = require("../context/AuthModalContext");
-  if (typeof authModule.useAuth === "function") useAuthHook = authModule.useAuth;
-} catch (e) {
-  // ignore - context might not be present in some setups
-}
-
-export type AuthModalProps = {
+// Lightweight local types so this file remains self-contained and TypeScript-safe
+interface AuthModalProps {
   visible?: boolean;
   onClose?: () => void;
-};
+}
 
 export default function AuthModal(props: AuthModalProps): React.ReactElement | null {
   const insets = useSafeAreaInsets();
-  const auth = (typeof useAuthHook === "function" ? useAuthHook() : null) ?? null;
 
-  const visible = props.visible ?? Boolean(auth?.openLoginVisible ?? auth?.visible ?? auth?.isOpen ?? false);
-  const onClose =
-    props.onClose ??
-    (() => {
-      if (auth) {
-        if (typeof auth.closeLogin === "function") return auth.closeLogin();
-        if (typeof auth.close === "function") return auth.close();
-        if (typeof auth.setOpen === "function") return auth.setOpen(false);
-      }
-    });
+  // Defensive dynamic require: some dev setups export useAuth differently.
+  // We attempt to load the hook at runtime. If not present, `auth` stays null
+  // and the component falls back to props-driven visibility.
+  let runtimeAuth: any = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const authModule = require("../context/AuthModalContext");
+    if (authModule && typeof authModule.useAuth === "function") {
+      // NOTE: calling a hook conditionally is usually discouraged, but this
+      // pattern is being used project-wide as a defensive fallback. If your
+      // codebase consistently exports useAuth, consider replacing this with
+      // a static `import { useAuth } from "@/context/AuthModalContext";`.
+      runtimeAuth = authModule.useAuth();
+    }
+  } catch (e) {
+    runtimeAuth = null;
+  }
+
+  // Computed visibility: prefer explicit prop, otherwise fall back to auth state
+  const computedVisible = Boolean(
+    props.visible ?? (runtimeAuth && (runtimeAuth.openLoginVisible ?? runtimeAuth.visible ?? runtimeAuth.isOpen)) ?? false
+  );
+
+  // debug information
+  // eslint-disable-next-line no-console
+  console.debug("[AuthModal] component render - props.visible:", props.visible, "computedVisible:", computedVisible);
+  // eslint-disable-next-line no-console
+  console.debug("[AuthModal] detected auth object:", runtimeAuth);
 
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const doLogin = useCallback(async () => {
-    setLoading(true);
+  const handleClose = useCallback(() => {
+    if (typeof props.onClose === "function") return props.onClose();
+    if (runtimeAuth && typeof runtimeAuth.closeLogin === "function") return runtimeAuth.closeLogin();
+    if (runtimeAuth && typeof runtimeAuth.close === "function") return runtimeAuth.close();
+  }, [props, runtimeAuth]);
+
+  const handleSubmit = useCallback(async () => {
     setErrorMsg(null);
+    setLoading(true);
     try {
-      if (auth && typeof auth.login === "function") {
-        const r = await auth.login(identifier, password);
-        // some login APIs return { success: true } others return token — we keep defensive
-        if (r && (r.success === false || r.error)) {
-          setErrorMsg(r.message ?? r.error ?? "Login failed");
-          setLoading(false);
-          return;
+      if (runtimeAuth && typeof runtimeAuth.login === "function") {
+        // many implementations accept an object; others accept (identifier, password)
+        let result: any = null;
+        try {
+          result = await runtimeAuth.login({ identifier: identifier.trim(), password });
+        } catch (err) {
+          // fallback to positional parameters if the implementation expects that
+          // (some older helpers do this)
+          try {
+            result = await runtimeAuth.login(identifier.trim(), password);
+          } catch (err2) {
+            // swallow; we'll show error below
+            throw err2 || err;
+          }
+        }
+
+        if (result && result.success) {
+          handleClose();
+        } else if (result && result.success === false) {
+          setErrorMsg(result.message ?? "Login failed");
         }
       } else {
-        // If no auth hook available we still allow consumer-provided onClose to close the modal
-        console.debug("[AuthModal] no auth.login available; calling onClose");
+        setErrorMsg("Login not available in this build");
       }
-      // close on success
-      onClose && onClose();
     } catch (err: any) {
-      console.error("[AuthModal] login error", err);
-      setErrorMsg(err?.message ?? String(err ?? "Login failed"));
+      setErrorMsg(err?.message ?? String(err) ?? "Login failed");
     } finally {
       setLoading(false);
     }
-  }, [auth, identifier, password, onClose]);
+  }, [identifier, password, runtimeAuth, handleClose]);
+
+  useEffect(() => {
+    if (computedVisible) setErrorMsg(null);
+  }, [computedVisible]);
+
+  if (!computedVisible) return null;
 
   return (
-    <Modal visible={Boolean(visible)} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View style={[styles.sheet, { marginTop: insets.top + 20 }]}>
+    <Modal
+      visible={true}
+      transparent
+      animationType="fade"
+      onRequestClose={handleClose}
+      presentationStyle="overFullScreen"
+    >
+      <View style={[styles.overlay, { paddingTop: insets.top || 16 }]}> 
+        <View style={styles.dialog}>
           <Text style={styles.title}>Sign in</Text>
 
           <TextInput
-            placeholder="Email or username"
             style={styles.input}
-            value={identifier}
-            onChangeText={setIdentifier}
+            placeholder="Email or username"
             keyboardType="email-address"
             autoCapitalize="none"
+            value={identifier}
+            onChangeText={setIdentifier}
+            editable={!loading}
           />
+
           <TextInput
-            placeholder="Password"
             style={styles.input}
+            placeholder="Password"
+            secureTextEntry
             value={password}
             onChangeText={setPassword}
-            secureTextEntry
-            autoCapitalize="none"
+            editable={!loading}
           />
 
           {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
 
-          <View style={styles.row}>
-            <TouchableOpacity style={styles.button} onPress={doLogin} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Sign in</Text>}
+          <View style={styles.actions}>
+            <TouchableOpacity style={[styles.btn, styles.cancel]} onPress={handleClose} disabled={loading}>
+              <Text style={[styles.btnText, { color: "#000" }]}>Cancel</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.button, styles.ghost]}
-              onPress={() => {
-                setIdentifier("");
-                setPassword("");
-                onClose && onClose();
-              }}
-            >
-              <Text style={[styles.btnText, { color: "#333" }]}>Cancel</Text>
+            <TouchableOpacity style={[styles.btn, styles.primary]} onPress={handleSubmit} disabled={loading}>
+              {loading ? <ActivityIndicator /> : <Text style={styles.btnText}>Sign in</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -112,22 +141,14 @@ export default function AuthModal(props: AuthModalProps): React.ReactElement | n
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.35)", justifyContent: "center", alignItems: "center" },
-  sheet: {
-    width: "86%",
-    backgroundColor: "#fff",
-    padding: 16,
-    borderRadius: 10,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 12,
-  },
-  title: { fontSize: 18, fontWeight: "700", marginBottom: 10 },
-  input: { borderWidth: 1, borderColor: "#eee", borderRadius: 8, padding: 10, marginBottom: 10 },
-  row: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
-  button: { backgroundColor: "#2B79FF", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 },
-  ghost: { backgroundColor: "#f2f2f2" },
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", alignItems: "center", justifyContent: "center" },
+  dialog: { width: "90%", maxWidth: 520, backgroundColor: "#fff", padding: 16, borderRadius: 8 },
+  title: { fontSize: 18, fontWeight: "700", marginBottom: 12 },
+  input: { borderWidth: 1, borderColor: "#ddd", borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8, marginBottom: 8 },
+  actions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 8 },
+  btn: { paddingHorizontal: 12, paddingVertical: 10, borderRadius: 6 },
+  primary: { backgroundColor: "#007AFF" },
+  cancel: { backgroundColor: "#eee" },
   btnText: { color: "#fff", fontWeight: "600" },
-  error: { color: "red", marginBottom: 8 },
+  error: { marginTop: 8, color: "#b00020" },
 });

@@ -1,92 +1,88 @@
-
-import AuthModal from "@/components/AuthModal";
-import authApi from "@/utils/authApi"; // keep your existing auth API wrapper
+// src/context/AuthModalContext.tsx
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useContext, useEffect, useState } from "react";
 
-export type MeUser = any; // narrow as per your authApi if you have types
+export type User = {
+  id: string;
+  name: string;
+  avatar?: string;
+  email?: string;
+};
 
 export type AuthContextValue = {
-  user?: MeUser | null;
-  login?: (identifier: string, password: string, securityCode?: string | null) => Promise<any>;
-  logout?: () => Promise<void>;
+  isOpen: boolean;
+  visible: boolean; // alias
   openLogin: () => void;
   closeLogin: () => void;
-  isOpen: boolean;
+  login: (token: string, user: User) => Promise<void>;
+  logout: () => Promise<void>;
+  user: User | null;
+  setUser: (u: User | null) => void;
 };
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+const AuthModalContext = createContext<AuthContextValue | undefined>(undefined);
 
-export const useAuth = (): AuthContextValue => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used within AuthModalProvider");
-  return ctx;
-};
+const AUTH_STORAGE_KEY = "gita:auth";
 
-export const AuthModalProvider: React.FC<{ children: React.ReactNode; anchorTop?: number }> = ({
-  children,
-  anchorTop = 0,
-}) => {
-  const [user, setUser] = useState<MeUser | null>(null);
+export const AuthModalProvider: React.FC<{ children: React.ReactNode; anchorTop?: number }> = ({ children }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
-    (globalThis as any).AuthController = {
-      open: () => setIsOpen(true),
-      close: () => setIsOpen(false),
-    };
-    // attempt to get current session user
+    // load persisted user
     (async () => {
       try {
-        const r = await authApi.getMe?.("FULL");
-        if (r?.success && r.user) setUser(r.user);
+        const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw) as { user: User; token?: string };
+          setUser(parsed.user ?? null);
+          // TODO: restore token in secure store if used
+        }
       } catch (e) {
-        // ignore
+        console.warn("Auth load error", e);
       }
     })();
-    return () => {
-      delete (globalThis as any).AuthController;
-    };
   }, []);
-
-  const login = async (identifier: string, password: string, securityCode?: string | null) => {
-    const result = await authApi.login({ identifier, password, securityCode });
-    if (result?.success) {
-      const me = await authApi.getMe?.("FULL");
-      if (me?.user) setUser(me.user);
-      setIsOpen(false);
-    }
-    return result;
-  };
-
-  const logout = async () => {
-    try {
-      await authApi.postJson?.("/logout");
-    } catch (e) {
-      // ignore
-    }
-    setUser(null);
-  };
 
   const openLogin = () => setIsOpen(true);
   const closeLogin = () => setIsOpen(false);
 
-  const value: AuthContextValue = {
-    user,
-    login,
-    logout,
-    openLogin,
-    closeLogin,
-    isOpen,
+  const login = async (token: string, userPayload: User) => {
+    // Save token securely (placeholder using AsyncStorage; consider SecureStore)
+    try {
+      await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ token, user: userPayload }));
+      setUser(userPayload);
+      setIsOpen(false);
+    } catch (e) {
+      console.warn("Auth save error", e);
+    }
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-      {/* Render the Auth modal here so it's physically mounted */}
-      <AuthModal visible={isOpen} onClose={closeLogin} anchorTop={anchorTop} />
-    </AuthContext.Provider>
-  );
+  const logout = async () => {
+    try {
+      await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
+      setUser(null);
+    } catch (e) {
+      console.warn("Auth logout error", e);
+    }
+  };
+
+  const value: AuthContextValue = {
+    isOpen,
+    visible: isOpen,
+    openLogin,
+    closeLogin,
+    login,
+    logout,
+    user,
+    setUser,
+  };
+
+  return <AuthModalContext.Provider value={value}>{children}</AuthModalContext.Provider>;
 };
 
-export { AuthModalProvider };
-export default AuthModalProvider;
+export const useAuth = (): AuthContextValue => {
+  const ctx = useContext(AuthModalContext);
+  if (!ctx) throw new Error("useAuth must be used within AuthModalProvider");
+  return ctx;
+};

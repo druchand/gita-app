@@ -1,104 +1,102 @@
-import LanguageModal from "@/components/LanguageModal";
-import React, { createContext, useContext, useEffect, useState } from "react";
+// src/context/LanguageContext.tsx
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 
-/**
- * Lang shape used across the app.
- */
-type LangShape = string | { code?: string; name?: string } | null;
-
-export type LanguageContextValue = {
-  lang?: LangShape;
-  langName?: string | null;
-  availableLangs?: { code: string; name: string }[];
-  openLanguage: () => void;
-  closeLanguage: () => void;
-  setLangCode?: (code: string) => Promise<void>;
-  isOpen: boolean;
+export type LangItem = {
+  code: string;
+  name: string;
+  nativeName?: string;
 };
 
-const LanguageContext = createContext<LanguageContextValue | null>(null);
+type LanguageContextValue = {
+  lang: string;
+  availableLangs: LangItem[];
+  isOpen: boolean;
+  openLanguage: () => void;
+  closeLanguage: () => void;
+  setLangCode: (code: string) => Promise<void>;
+  refreshLanguages: () => Promise<void>;
+};
 
-export const useLanguage = (): LanguageContextValue => {
+const LanguageContext = createContext<LanguageContextValue | undefined>(undefined);
+
+const LANG_STORAGE_KEY = "gita:selectedLang";
+
+export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [lang, setLang] = useState<string>("EN");
+  const [availableLangs, setAvailableLangs] = useState<LangItem[]>([]);
+  const [isOpen, setIsOpen] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+
+  // ---- Fetch available languages from backend ----
+  const fetchLanguages = useCallback(async () => {
+    try {
+      const res = await fetch("https://eq21.co.in/_functions/AppLanguages");
+      const text = await res.text();
+      if (!text) throw new Error("Empty response");
+      const json = JSON.parse(text);
+      if (Array.isArray(json)) setAvailableLangs(json);
+      else throw new Error("Unexpected response");
+    } catch (err) {
+      console.warn("Failed to load languages:", err);
+      // fallback to English/Hindi
+      setAvailableLangs([
+        { code: "EN", name: "English" },
+        { code: "HI", name: "हिन्दी" },
+      ]);
+    }
+  }, []);
+
+  // ---- Load saved language from AsyncStorage ----
+  useEffect(() => {
+    (async () => {
+      try {
+        const saved = await AsyncStorage.getItem(LANG_STORAGE_KEY);
+        if (saved) setLang(saved);
+      } catch (err) {
+        console.warn("Failed to load stored language", err);
+      } finally {
+        setHydrated(true);
+      }
+    })();
+  }, []);
+
+  // ---- Fetch languages once on mount ----
+  useEffect(() => {
+    fetchLanguages();
+  }, [fetchLanguages]);
+
+  const openLanguage = () => setIsOpen(true);
+  const closeLanguage = () => setIsOpen(false);
+
+  const setLangCode = async (code: string) => {
+    setLang(code);
+    setIsOpen(false);
+    try {
+      await AsyncStorage.setItem(LANG_STORAGE_KEY, code);
+    } catch (err) {
+      console.warn("Failed to persist language", err);
+    }
+  };
+
+  const value: LanguageContextValue = {
+    lang,
+    availableLangs,
+    isOpen,
+    openLanguage,
+    closeLanguage,
+    setLangCode,
+    refreshLanguages: fetchLanguages,
+  };
+
+  // Avoid flicker before hydration
+  if (!hydrated) return null;
+
+  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
+};
+
+export const useLanguage = () => {
   const ctx = useContext(LanguageContext);
   if (!ctx) throw new Error("useLanguage must be used within LanguageProvider");
   return ctx;
 };
-
-export const LanguageProvider: React.FC<{ children: React.ReactNode; anchorTop?: number }> = ({
-  children,
-  anchorTop = 0,
-}) => {
-  const [lang, setLang] = useState<LangShape>("EN");
-  const [availableLangs, setAvailableLangs] = useState<{ code: string; name: string }[] | null>(null);
-  const [isOpen, setIsOpen] = useState(false);
-
-  // set human-friendly name derived from `lang`
-  const langName = (() => {
-    if (!lang) return null;
-    if (typeof lang === "string") return lang;
-    return (lang as any).name ?? (lang as any).code ?? null;
-  })();
-
-  async function setLangCode(code: string) {
-    // keep simple: set local state; caller can also call backend if needed
-    setLang(code);
-    // optionally persist to localStorage / backend here
-    return Promise.resolve();
-  }
-
-  const openLanguage = () => {
-    setIsOpen(true);
-  };
-  const closeLanguage = () => {
-    setIsOpen(false);
-  };
-
-  // global controller so AppHeader can call (similar to MenuController)
-  useEffect(() => {
-    (globalThis as any).LanguageController = {
-      open: openLanguage,
-      close: closeLanguage,
-    };
-    console.debug("[LanguageProvider] mounted");
-    // fetch languages from backend if needed
-    (async () => {
-      try {
-        // example endpoint — replace with your real one (or remove)
-        const res = await fetch("https://eq21.co.in/_functions/langs");
-        const data = await res.json();
-        if (Array.isArray(data?.langs)) setAvailableLangs(data.langs);
-      } catch (e) {
-        // fallback defaults
-        setAvailableLangs([
-          { code: "EN", name: "English" },
-          { code: "HI", name: "Hindi" },
-        ]);
-      }
-    })();
-
-    return () => {
-      delete (globalThis as any).LanguageController;
-      console.debug("[LanguageProvider] unmounted");
-    };
-  }, []);
-
-  const value: LanguageContextValue = {
-    lang,
-    langName,
-    availableLangs: availableLangs ?? undefined,
-    openLanguage,
-    closeLanguage,
-    setLangCode,
-    isOpen,
-  };
-
-  return (
-    <LanguageContext.Provider value={value}>
-      {children}
-      {/* Render modal UI from here so it's mounted at top-level and can overlay content */}
-      <LanguageModal visible={isOpen} onClose={closeLanguage} anchorTop={anchorTop} />
-    </LanguageContext.Provider>
-  );
-};
-
-export default LanguageProvider;
