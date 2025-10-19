@@ -1,0 +1,12 @@
+{
+  "app": {
+    "title": "Gita App",
+    "loading": "Loading…",
+    "retry": "Retry",
+    "menu": "Menu",
+    "login": "Login",
+    "logout": "Logout",
+    "language": "Language",
+    "open": "Open"
+  }
+}

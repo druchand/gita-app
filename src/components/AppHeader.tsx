@@ -1,104 +1,86 @@
-// src/components/AppHeader.tsx
-import { Ionicons } from "@expo/vector-icons";
-import React from "react";
-import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+// src/components/AppHeader.tsx  (debug version)
+import { useMenuDrawer } from "@/components/MenuDrawer";
+import { useLanguage } from "@/context/LanguageContext";
+import React, { useEffect } from "react";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { useMenuDrawer } from "@/components/MenuDrawer"; // ✅ Correct import
-import { useAuth } from "@/context/AuthModalContext";
-import { useLanguage } from "@/context/LanguageContext";
-
-export default function AppHeader() {
+export default function AppHeader(): React.ReactElement {
   const insets = useSafeAreaInsets();
-  const { openMenu } = useMenuDrawer(); // ✅ renamed to openMenu
-  const { openLogin, user } = useAuth();
-  const { openLanguage } = useLanguage();
+  const topPadding = Math.max(insets.top, 8);
+
+  useEffect(() => {
+    console.debug("[AppHeader] mounted - safeTop:", insets.top);
+    return () => console.debug("[AppHeader] unmounted");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const menuDrawer = (typeof useMenuDrawer === "function" ? useMenuDrawer() : null) as any | null;
+  const openDrawer = menuDrawer && typeof menuDrawer.openDrawer === "function"
+    ? () => menuDrawer.openDrawer()
+    : () => console.debug("[AppHeader] openDrawer not available");
+
+  const langCtx = (typeof useLanguage === "function" ? useLanguage() : null) as any | null;
+  const openLanguage = langCtx && typeof langCtx.openLanguage === "function"
+    ? () => langCtx.openLanguage()
+    : () => console.debug("[AppHeader] openLanguage not available");
 
   return (
-    <View style={[styles.header, { paddingTop: insets.top }]}>
-      {/* Left: Menu */}
-      <TouchableOpacity onPress={openMenu} style={styles.iconButton}>
-        <Ionicons name="menu" size={24} color="#333" />
-      </TouchableOpacity>
-
-      {/* Center: Title */}
-      <Text style={styles.title}>Gita App</Text>
-
-      {/* Right: Language + Auth */}
-      <View style={styles.rightGroup}>
-        <TouchableOpacity onPress={openLanguage} style={styles.iconButton}>
-          <Ionicons name="globe-outline" size={20} color="#333" />
+    <View
+      testID="debug-app-header"
+      style={[styles.container, { paddingTop: topPadding }]}
+      pointerEvents="box-none"
+    >
+      {/* visible debugging header */}
+      <View style={styles.inner}>
+        <TouchableOpacity onPress={openDrawer} style={styles.iconBtn}>
+          <Text style={styles.icon}>☰</Text>
         </TouchableOpacity>
 
-        {user ? (
-          <TouchableOpacity style={styles.profileButton}>
-            {user.avatar ? (
-              <Image source={{ uri: user.avatar }} style={styles.avatar} />
-            ) : (
-              <Text style={styles.userInitial}>{user.name?.[0] ?? "U"}</Text>
-            )}
+        <View style={styles.titleWrap}>
+          <Text style={styles.title}>Gita App (HEADER)</Text>
+        </View>
+
+        <View style={styles.right}>
+          <TouchableOpacity onPress={openLanguage} style={styles.iconBtn}>
+            <Text style={styles.icon}>🌐</Text>
           </TouchableOpacity>
-        ) : (
-          <TouchableOpacity onPress={openLogin} style={styles.loginButton}>
+
+          <TouchableOpacity onPress={() => console.debug("[AppHeader] login pressed")} style={styles.loginBtn}>
             <Text style={styles.loginText}>Login</Text>
           </TouchableOpacity>
-        )}
+        </View>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  header: {
+  container: {
+    width: "100%",
+    backgroundColor: "#ffefef", // light red background so it's obvious
+    borderBottomWidth: 2,
+    borderBottomColor: "#ff4d4d",
+    zIndex: 9999,
+  },
+  inner: {
+    height: 56,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-    backgroundColor: "#fff",
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    paddingHorizontal: 12,
   },
-  iconButton: {
-    padding: 6,
-  },
-  rightGroup: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  loginButton: {
+  iconBtn: { padding: 8 },
+  icon: { fontSize: 20 },
+  titleWrap: { flex: 1, alignItems: "center" },
+  title: { fontWeight: "700", fontSize: 18 },
+  right: { flexDirection: "row", alignItems: "center" },
+  loginBtn: {
     marginLeft: 8,
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    backgroundColor: "#f5f5f5",
+    paddingVertical: 6,
     borderRadius: 6,
+    borderWidth: 1,
+    borderColor: "#ddd",
   },
-  loginText: {
-    fontSize: 14,
-    color: "#333",
-  },
-  profileButton: {
-    marginLeft: 8,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#ddd",
-  },
-  avatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-  },
-  userInitial: {
-    fontWeight: "600",
-    color: "#333",
-  },
+  loginText: { fontSize: 14 },
 });

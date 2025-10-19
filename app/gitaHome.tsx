@@ -3,6 +3,7 @@ import { useLanguage } from "@/context/LanguageContext";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ActivityIndicator,
   Alert,
@@ -22,6 +23,11 @@ type Block = {
   description?: string;
   action?: { type?: string; target?: string };
 };
+
+export  function TestI18nHeader() {
+  const { t } = useTranslation();
+  return <Text>{t("app.title")}</Text>;
+}
 
 const CACHE_KEY_PREFIX = "gita:home:"; // + lang
 const FETCH_TIMEOUT_MS = 15000;
