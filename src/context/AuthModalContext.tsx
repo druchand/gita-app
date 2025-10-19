@@ -1,88 +1,89 @@
 // src/context/AuthModalContext.tsx
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useMemo, useState } from "react";
 
-export type User = {
-  id: string;
-  name: string;
-  avatar?: string;
+type User = {
+  id?: string;
+  name?: string;
   email?: string;
+  avatarUrl?: string;
 };
 
-export type AuthContextValue = {
+type AuthModalContextValue = {
+  user: User | null | undefined;
   isOpen: boolean;
-  visible: boolean; // alias
   openLogin: () => void;
   closeLogin: () => void;
-  login: (token: string, user: User) => Promise<void>;
-  logout: () => Promise<void>;
-  user: User | null;
+  login: (payload: Partial<User>) => Promise<void>;
+  logout: () => void;
   setUser: (u: User | null) => void;
 };
 
-const AuthModalContext = createContext<AuthContextValue | undefined>(undefined);
+const AuthModalContext = createContext<AuthModalContextValue | undefined>(undefined);
 
-const AUTH_STORAGE_KEY = "gita:auth";
+export const AuthModalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [user, setUser] = useState<User | null | undefined>(null);
+  const [isOpen, setIsOpen] = useState<boolean>(false);
 
-export const AuthModalProvider: React.FC<{ children: React.ReactNode; anchorTop?: number }> = ({ children }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
-
-  useEffect(() => {
-    // load persisted user
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(AUTH_STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw) as { user: User; token?: string };
-          setUser(parsed.user ?? null);
-          // TODO: restore token in secure store if used
-        }
-      } catch (e) {
-        console.warn("Auth load error", e);
-      }
-    })();
-  }, []);
-
-  const openLogin = () => setIsOpen(true);
-  const closeLogin = () => setIsOpen(false);
-
-  const login = async (token: string, userPayload: User) => {
-    // Save token securely (placeholder using AsyncStorage; consider SecureStore)
+  const openLogin = () => {
+    console.debug("[AuthModalContext] openLogin() - prev isOpen:", isOpen);
     try {
-      await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ token, user: userPayload }));
-      setUser(userPayload);
+      setIsOpen(true);
+      console.debug("[AuthModalContext] openLogin() - requested visible: true");
+    } catch (err) {
+      console.warn("[AuthModalContext] openLogin() error", err);
+    }
+  };
+
+  const closeLogin = () => {
+    console.debug("[AuthModalContext] closeLogin() - prev isOpen:", isOpen);
+    try {
       setIsOpen(false);
-    } catch (e) {
-      console.warn("Auth save error", e);
+      console.debug("[AuthModalContext] closeLogin() - requested visible: false");
+    } catch (err) {
+      console.warn("[AuthModalContext] closeLogin() error", err);
     }
   };
 
-  const logout = async () => {
+  const login = async (payload: Partial<User>) => {
+    // do not log sensitive data like passwords
+    console.debug("[AuthModalContext] login() called with", { id: payload.id, email: payload.email, name: payload.name });
     try {
-      await AsyncStorage.removeItem(AUTH_STORAGE_KEY);
-      setUser(null);
-    } catch (e) {
-      console.warn("Auth logout error", e);
+      // simulate/perform auth; this function should be replaced with real API call
+      // For now set user and close modal
+      setUser({
+        id: payload.id ?? "local-temp-id",
+        name: payload.name ?? "User",
+        email: payload.email ?? undefined,
+        avatarUrl: payload.avatarUrl ?? undefined,
+      });
+      setIsOpen(false);
+      console.debug("[AuthModalContext] login() set user and closed modal");
+    } catch (err) {
+      console.warn("[AuthModalContext] login() error", err);
+      throw err;
     }
   };
 
-  const value: AuthContextValue = {
-    isOpen,
-    visible: isOpen,
-    openLogin,
-    closeLogin,
-    login,
-    logout,
-    user,
-    setUser,
+  const logout = () => {
+    console.debug("[AuthModalContext] logout() called - clearing user");
+    try {
+      setUser(null);
+      console.debug("[AuthModalContext] logout() cleared user");
+    } catch (err) {
+      console.warn("[AuthModalContext] logout() error", err);
+    }
   };
+
+  const value = useMemo<AuthModalContextValue>(
+    () => ({ user, isOpen, openLogin, closeLogin, login, logout, setUser }),
+    [user, isOpen]
+  );
 
   return <AuthModalContext.Provider value={value}>{children}</AuthModalContext.Provider>;
 };
 
-export const useAuth = (): AuthContextValue => {
+export function useAuth(): AuthModalContextValue {
   const ctx = useContext(AuthModalContext);
   if (!ctx) throw new Error("useAuth must be used within AuthModalProvider");
   return ctx;
-};
+}
