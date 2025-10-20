@@ -1,76 +1,112 @@
 // src/context/LanguageContext.tsx
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-export type LangItem = { _id?: string; code: string; name: string };
+export type LangItem = { code: string; name: string; _id?: string };
 
-export type LanguageContextValue = {
-  isOpen: boolean;
-  langCode: string;
-  lang: string;
-  availableLangs: LangItem[];
-  openLanguage: () => void;
-  closeLanguage: () => void;
-  setLangCode: (code: string) => void;
-};
+export interface LanguageContextValue {
+  lang: string;                       // current language code, e.g. "EN"
+  availableLangs: LangItem[];         // list shown in LanguageModal
+  loading: boolean;                   // backend fetch in progress
+  openLanguage: () => void;           // open modal
+  closeLanguage: () => void;          // close modal
+  selectLanguage: (code: string) => void; // set language and close modal
+  isLanguageOpen: boolean;            // <-- used by LanguageModal
+}
 
-const LanguageContext = createContext<LanguageContextValue | undefined>(undefined);
+const LanguageContext = createContext<LanguageContextValue | undefined>(
+  undefined
+);
 
-export const LanguageProvider: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [langCode, setLangCodeState] = useState("EN");
-  const [availableLangs, setAvailableLangs] = useState<LangItem[]>([]);
+export function useLanguage(): LanguageContextValue {
+  const ctx = useContext(LanguageContext);
+  if (!ctx) {
+    throw new Error("useLanguage must be used within LanguageProvider");
+  }
+  return ctx;
+}
 
+const FALLBACK_LANGS: LangItem[] = [
+  { code: "EN", name: "English" },
+  { code: "HI", name: "Hindi" },
+];
+
+export function LanguageProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}): React.ReactElement {
+  const [lang, setLang] = useState<string>("EN");
+  const [availableLangs, setAvailable] = useState<LangItem[]>(
+    FALLBACK_LANGS
+  );
+  const [loading, setLoading] = useState<boolean>(false);
+
+  // Modal visibility managed here so LanguageModal can read it
+  const [isLanguageOpen, setIsLanguageOpen] = useState<boolean>(false);
+
+  const openLanguage = () => setIsLanguageOpen(true);
+  const closeLanguage = () => setIsLanguageOpen(false);
+
+  // Select + close; external screens can refetch on lang change
+  const selectLanguage = (code: string) => {
+    setLang(code);
+    setIsLanguageOpen(false);
+  };
+
+  // Load available languages from backend (defensive; fallback kept)
   useEffect(() => {
-    setAvailableLangs((prev) => prev.length ? prev : [{ code: "EN", name: "English" }, { code: "HI", name: "Hindi" }]);
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        const res = await fetch("https://eq21.co.in/_functions/AppLanguages");
+        if (!res.ok) throw new Error(res.statusText);
+        const data = await res.json();
+        // Expect either array of { code, name } or normalize common shapes
+        if (!cancelled && Array.isArray(data) && data.length) {
+          const norm: LangItem[] = data
+            .map((x: any) => ({
+              _id: x._id ?? x.id,
+              code: x.code ?? x.id ?? "",
+              name: x.name ?? x.title ?? "",
+            }))
+            .filter((x) => x.code && x.name);
+          if (norm.length) setAvailable(norm);
+        }
+      } catch (e) {
+        // swallow; fallback already in state
+        console.warn("[LanguageProvider] Failed to load languages:", e);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const open = useCallback(() => setIsOpen(true), []);
-  const close = useCallback(() => setIsOpen(false), []);
-  const setLang = useCallback((code: string) => setLangCodeState(code), []);
-
-  const value = useMemo(() => ({ isOpen, langCode, lang: langCode, availableLangs, openLanguage: open, closeLanguage: close, setLangCode: setLang }), [isOpen, langCode, availableLangs, open, close, setLang]);
+  const value = useMemo<LanguageContextValue>(
+    () => ({
+      lang,
+      availableLangs,
+      loading,
+      openLanguage,
+      closeLanguage,
+      selectLanguage,
+      isLanguageOpen,
+    }),
+    [lang, availableLangs, loading, isLanguageOpen]
+  );
 
   return (
     <LanguageContext.Provider value={value}>
       {children}
-      <Modal visible={isOpen} animationType="slide" transparent onRequestClose={close}>
-        <View style={styles.backdrop}>
-          <View style={styles.card}>
-            <Text style={styles.title}>Choose language</Text>
-            <FlatList
-              data={availableLangs}
-              keyExtractor={(it) => it.code}
-              renderItem={({ item }) => (
-                <Pressable style={styles.langItem} onPress={() => { setLang(item.code); close(); }}>
-                  <Text style={styles.langText}>{item.name} ({item.code})</Text>
-                </Pressable>
-              )}
-              ListEmptyComponent={<Text style={{ textAlign: 'center', color: '#666' }}>No languages</Text>}
-            />
-            <View style={styles.actions}>
-              <Pressable style={styles.btn} onPress={close}><Text style={styles.btnText}>Close</Text></Pressable>
-            </View>
-          </View>
-        </View>
-      </Modal>
     </LanguageContext.Provider>
   );
-};
-
-export function useLanguage(): LanguageContextValue {
-  const ctx = useContext(LanguageContext);
-  if (!ctx) throw new Error("useLanguage must be used inside LanguageProvider");
-  return ctx;
 }
-
-const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: 16 },
-  card: { width: '100%', maxWidth: 520, backgroundColor: '#fff', borderRadius: 12, padding: 16 },
-  title: { fontSize: 18, fontWeight: '700', marginBottom: 12 },
-  langItem: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
-  langText: { fontSize: 16 },
-  actions: { marginTop: 12, alignItems: 'center' },
-  btn: { paddingVertical: 10, paddingHorizontal: 16, backgroundColor: '#3b82f6', borderRadius: 8 },
-  btnText: { color: '#fff', fontWeight: '600' },
-});
