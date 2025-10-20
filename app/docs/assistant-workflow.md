@@ -1,0 +1,11 @@
+Assistant workflow (enforced)
+- No automatic multi-file edits.
+- Assistant MUST ask for permission before calling oboe.edit_file.
+- Allowed approvals:
+  - "OK apply patch"  -> single-file patch allowed
+  - "OK apply patch: multi" -> multiple-file patch allowed
+  - "Require PR" -> assistant only provides patches, does not apply
+- All changes must be validated locally with:
+  - npx tsc --noEmit
+  - npx expo start -c
+- Protect main; merge via PR only.

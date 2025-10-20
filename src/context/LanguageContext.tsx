@@ -1,102 +1,76 @@
 // src/context/LanguageContext.tsx
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { FlatList, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 
-export type LangItem = {
-  code: string;
-  name: string;
-  nativeName?: string;
-};
+export type LangItem = { _id?: string; code: string; name: string };
 
-type LanguageContextValue = {
+export type LanguageContextValue = {
+  isOpen: boolean;
+  langCode: string;
   lang: string;
   availableLangs: LangItem[];
-  isOpen: boolean;
   openLanguage: () => void;
   closeLanguage: () => void;
-  setLangCode: (code: string) => Promise<void>;
-  refreshLanguages: () => Promise<void>;
+  setLangCode: (code: string) => void;
 };
 
 const LanguageContext = createContext<LanguageContextValue | undefined>(undefined);
 
-const LANG_STORAGE_KEY = "gita:selectedLang";
-
-export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [lang, setLang] = useState<string>("EN");
-  const [availableLangs, setAvailableLangs] = useState<LangItem[]>([]);
+export const LanguageProvider: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   const [isOpen, setIsOpen] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
+  const [langCode, setLangCodeState] = useState("EN");
+  const [availableLangs, setAvailableLangs] = useState<LangItem[]>([]);
 
-  // ---- Fetch available languages from backend ----
-  const fetchLanguages = useCallback(async () => {
-    try {
-      const res = await fetch("https://eq21.co.in/_functions/AppLanguages");
-      const text = await res.text();
-      if (!text) throw new Error("Empty response");
-      const json = JSON.parse(text);
-      if (Array.isArray(json)) setAvailableLangs(json);
-      else throw new Error("Unexpected response");
-    } catch (err) {
-      console.warn("Failed to load languages:", err);
-      // fallback to English/Hindi
-      setAvailableLangs([
-        { code: "EN", name: "English" },
-        { code: "HI", name: "हिन्दी" },
-      ]);
-    }
+  useEffect(() => {
+    setAvailableLangs((prev) => prev.length ? prev : [{ code: "EN", name: "English" }, { code: "HI", name: "Hindi" }]);
   }, []);
 
-  // ---- Load saved language from AsyncStorage ----
-  useEffect(() => {
-    (async () => {
-      try {
-        const saved = await AsyncStorage.getItem(LANG_STORAGE_KEY);
-        if (saved) setLang(saved);
-      } catch (err) {
-        console.warn("Failed to load stored language", err);
-      } finally {
-        setHydrated(true);
-      }
-    })();
-  }, []);
+  const open = useCallback(() => setIsOpen(true), []);
+  const close = useCallback(() => setIsOpen(false), []);
+  const setLang = useCallback((code: string) => setLangCodeState(code), []);
 
-  // ---- Fetch languages once on mount ----
-  useEffect(() => {
-    fetchLanguages();
-  }, [fetchLanguages]);
+  const value = useMemo(() => ({ isOpen, langCode, lang: langCode, availableLangs, openLanguage: open, closeLanguage: close, setLangCode: setLang }), [isOpen, langCode, availableLangs, open, close, setLang]);
 
-  const openLanguage = () => setIsOpen(true);
-  const closeLanguage = () => setIsOpen(false);
-
-  const setLangCode = async (code: string) => {
-    setLang(code);
-    setIsOpen(false);
-    try {
-      await AsyncStorage.setItem(LANG_STORAGE_KEY, code);
-    } catch (err) {
-      console.warn("Failed to persist language", err);
-    }
-  };
-
-  const value: LanguageContextValue = {
-    lang,
-    availableLangs,
-    isOpen,
-    openLanguage,
-    closeLanguage,
-    setLangCode,
-    refreshLanguages: fetchLanguages,
-  };
-
-  // Avoid flicker before hydration
-  if (!hydrated) return null;
-
-  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
+  return (
+    <LanguageContext.Provider value={value}>
+      {children}
+      <Modal visible={isOpen} animationType="slide" transparent onRequestClose={close}>
+        <View style={styles.backdrop}>
+          <View style={styles.card}>
+            <Text style={styles.title}>Choose language</Text>
+            <FlatList
+              data={availableLangs}
+              keyExtractor={(it) => it.code}
+              renderItem={({ item }) => (
+                <Pressable style={styles.langItem} onPress={() => { setLang(item.code); close(); }}>
+                  <Text style={styles.langText}>{item.name} ({item.code})</Text>
+                </Pressable>
+              )}
+              ListEmptyComponent={<Text style={{ textAlign: 'center', color: '#666' }}>No languages</Text>}
+            />
+            <View style={styles.actions}>
+              <Pressable style={styles.btn} onPress={close}><Text style={styles.btnText}>Close</Text></Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </LanguageContext.Provider>
+  );
 };
 
-export const useLanguage = () => {
+export function useLanguage(): LanguageContextValue {
   const ctx = useContext(LanguageContext);
-  if (!ctx) throw new Error("useLanguage must be used within LanguageProvider");
+  if (!ctx) throw new Error("useLanguage must be used inside LanguageProvider");
   return ctx;
-};
+}
+
+const styles = StyleSheet.create({
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: 16 },
+  card: { width: '100%', maxWidth: 520, backgroundColor: '#fff', borderRadius: 12, padding: 16 },
+  title: { fontSize: 18, fontWeight: '700', marginBottom: 12 },
+  langItem: { paddingVertical: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#eee' },
+  langText: { fontSize: 16 },
+  actions: { marginTop: 12, alignItems: 'center' },
+  btn: { paddingVertical: 10, paddingHorizontal: 16, backgroundColor: '#3b82f6', borderRadius: 8 },
+  btnText: { color: '#fff', fontWeight: '600' },
+});
