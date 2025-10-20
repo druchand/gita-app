@@ -1,10 +1,7 @@
 // src/components/MenuDrawer.tsx
-import React, { createContext, useContext, useState } from "react";
-import { Dimensions, Pressable, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { createContext, useContext, useMemo, useState } from "react";
+import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-
-const SCREEN_WIDTH = Dimensions.get("window").width;
-const HEADER_HEIGHT = 56;
 
 type MenuDrawerContextValue = {
   isOpen: boolean;
@@ -14,102 +11,102 @@ type MenuDrawerContextValue = {
 
 const MenuDrawerContext = createContext<MenuDrawerContextValue | undefined>(undefined);
 
-/**
- * Named export: MenuDrawerProvider
- * Provides: isOpen, openMenu, closeMenu
- */
-export const MenuDrawerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [isOpen, setIsOpen] = useState(false);
+export function useMenuDrawer(): MenuDrawerContextValue {
+  const ctx = useContext(MenuDrawerContext);
+  if (!ctx) {
+    // Keep it forgiving in production, but we do throw here to catch mis-mounts.
+    throw new Error("useMenuDrawer must be used within MenuDrawerProvider");
+  }
+  return ctx;
+}
 
-  const openMenu = () => setIsOpen(true);
-  const closeMenu = () => setIsOpen(false);
+export function MenuDrawerProvider({ children }: { children: React.ReactNode }) {
+  const [isOpen, setOpen] = useState(false);
+  const insets = useSafeAreaInsets();
+
+  const value = useMemo(
+    () => ({
+      isOpen,
+      openMenu: () => setOpen(true),
+      closeMenu: () => setOpen(false),
+    }),
+    [isOpen]
+  );
 
   return (
-    <MenuDrawerContext.Provider value={{ isOpen, openMenu, closeMenu }}>
+    <MenuDrawerContext.Provider value={value}>
       {children}
-      {/* Render the drawer overlay at the end so it is above app content */}
-      {isOpen ? <MenuDrawer closeMenu={closeMenu} /> : null}
+
+      <Modal visible={isOpen} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
+          <View
+            style={[
+              styles.sheet,
+              {
+                marginTop: Math.max(insets.top, 8) + 48, // appear just under header
+              },
+            ]}
+          >
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>Menu</Text>
+              <Pressable onPress={() => setOpen(false)}>
+                <Text style={styles.close}>✕</Text>
+              </Pressable>
+            </View>
+
+            {[
+              { key: "home", label: "Home" },
+              { key: "profile", label: "Profile" },
+              { key: "settings", label: "Settings" },
+              { key: "help", label: "Help" },
+            ].map((it) => (
+              <Pressable
+                key={it.key}
+                style={styles.item}
+                onPress={() => {
+                  // wire navigation later; for now just close
+                  setOpen(false);
+                  console.debug("[MenuDrawer] item pressed:", it.key);
+                }}
+              >
+                <Text style={styles.itemText}>{it.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
     </MenuDrawerContext.Provider>
   );
-};
-
-export const useMenuDrawer = (): MenuDrawerContextValue => {
-  const ctx = useContext(MenuDrawerContext);
-  if (!ctx) throw new Error("useMenuDrawer must be used within MenuDrawerProvider");
-  return ctx;
-};
-
-/** Internal drawer UI component */
-const MenuDrawer: React.FC<{ closeMenu: () => void }> = ({ closeMenu }) => {
-  const insets = useSafeAreaInsets();
-  const drawerWidth = Math.min(SCREEN_WIDTH * 0.78, 320);
-
-  return (
-    <View style={styles.overlay} pointerEvents="box-none">
-      <View style={[styles.drawer, { top: insets.top + HEADER_HEIGHT, width: drawerWidth }]}>
-        <Text style={styles.title}>Menu</Text>
-
-        <TouchableOpacity
-          onPress={() => {
-            console.debug("[MenuDrawer] item pressed: home");
-            closeMenu();
-          }}
-          style={styles.itemWrap}
-        >
-          <Text style={styles.item}>Home</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={() => {
-            console.debug("[MenuDrawer] item pressed: profile");
-            closeMenu();
-          }}
-          style={styles.itemWrap}
-        >
-          <Text style={styles.item}>My Profile</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* backdrop */}
-      <Pressable style={styles.backdrop} onPress={closeMenu} />
-    </View>
-  );
-};
+}
 
 const styles = StyleSheet.create({
-  overlay: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    zIndex: 1000,
-  },
-  drawer: {
-    backgroundColor: "#fff",
-    height: "100%",
-    paddingHorizontal: 16,
-    paddingVertical: 24,
-    shadowColor: "#000",
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 8,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 16,
-  },
-  itemWrap: {
-    paddingVertical: 8,
-  },
-  item: {
-    fontSize: 16,
-  },
   backdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.3)",
+    backgroundColor: "rgba(0,0,0,0.35)",
+    alignItems: "flex-start",
+  },
+  sheet: {
+    width: "86%",
+    maxWidth: 360,
+    marginLeft: 16,
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  sheetTitle: { fontSize: 18, fontWeight: "600" },
+  close: { fontSize: 18 },
+  item: {
+    paddingVertical: 12,
+  },
+  itemText: {
+    fontSize: 16,
   },
 });
-export default MenuDrawerProvider;

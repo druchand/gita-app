@@ -1,18 +1,28 @@
-// app/_layout.tsx — step A: SafeAreaProvider + Slot
+// app/_layout.tsx
 import { Slot } from "expo-router";
 import React from "react";
-import { StyleSheet } from "react-native";
-import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import "../src/i18n"; // safe, low-risk — initializes i18n early
+import { SafeAreaProvider } from "react-native-safe-area-context";
+
+import AppHeader from "@/components/AppHeader";
+import LanguageModal from "@/components/LanguageModal";
+
+import { MenuDrawerProvider } from "@/components/MenuDrawer";
+import { AuthModalProvider } from "@/context/AuthModalContext";
+import { LanguageProvider } from "@/context/LanguageContext";
 
 export default function RootLayout(): React.ReactElement {
   return (
     <SafeAreaProvider>
-      <SafeAreaView style={styles.root} edges={["top", "left", "right", "bottom"]}>
-        <Slot />
-      </SafeAreaView>
+      <LanguageProvider>
+        <AuthModalProvider>
+          <MenuDrawerProvider>
+            <AppHeader />
+            {/* Mount the modal so openLanguage()/closeLanguage() can show/hide it */}
+            <LanguageModal />
+            <Slot />
+          </MenuDrawerProvider>
+        </AuthModalProvider>
+      </LanguageProvider>
     </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({ root: { flex: 1 } });

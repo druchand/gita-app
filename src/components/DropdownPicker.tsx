@@ -1,73 +1,64 @@
-// src/components/DropdownPicker.tsx
-import { useLanguage } from "@/context/LanguageContext";
-import React, { useMemo } from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React from "react";
+import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 
-type Option = { code: string; name: string };
+interface DropdownPickerProps {
+  options: { label: string; value: string }[];
+  onChange?: (value: string) => void | Promise<void>;
+  selectedValue?: string;
+}
 
-export default function DropdownPicker() : React.ReactElement {
-  const langCtx = useLanguage();
-  const lang = langCtx?.lang;
-  // prefer setLangCode, then setLang, then setLanguage (defensive)
-  const setLangFn: ((c: string) => Promise<void>) | ((c: string) => void) | undefined =
-    (langCtx as any)?.setLangCode ?? (langCtx as any)?.setLang ?? (langCtx as any)?.setLanguage;
+export default function DropdownPicker({
+  options,
+  onChange,
+  selectedValue,
+}: DropdownPickerProps) {
+  const handleSelect = async (value: string) => {
+    try {
+      // normalize sync or async handlers
+      await Promise.resolve(onChange?.(value));
+    } catch (err) {
+      console.warn("[DropdownPicker] onChange failed:", err);
+    }
+  };
 
-  const available: Option[] = useMemo(() => {
-    // If context provides availableLangs use that; otherwise fallback to EN/H I
-    const raw = (langCtx as any)?.availableLangs ?? [{ code: "EN", name: "English" }, { code: "HI", name: "हिन्दी" }];
-    return raw.map((r: any) => ({ code: r.code ?? r.lang ?? String(r), name: r.name ?? r.langName ?? String(r) }));
-  }, [langCtx]);
-
-  const selectedCode = typeof lang === "string" ? lang : (lang && (lang as any).code) ?? "EN";
+  const renderItem = ({ item }: { item: { label: string; value: string } }) => (
+    <Pressable
+      onPress={() => handleSelect(item.value)}
+      style={[
+        styles.option,
+        selectedValue === item.value && styles.selectedOption,
+      ]}
+    >
+      <Text
+        style={[
+          styles.optionText,
+          selectedValue === item.value && styles.selectedText,
+        ]}
+      >
+        {item.label}
+      </Text>
+    </Pressable>
+  );
 
   return (
-    <View>
-      <Text style={styles.label}>Language</Text>
-      <View style={styles.row}>
-        {available.map((opt) => (
-          <TouchableOpacity
-            key={opt.code}
-            style={[styles.btn, selectedCode === opt.code ? styles.btnActive : null]}
-            onPress={() => {
-              if (typeof setLangFn === "function") {
-                try {
-                  const res = setLangFn(opt.code);
-                  // optionally handle a promise
-                  if (res && typeof (res as Promise<any>).then === "function") {
-                    (res as Promise<any>).catch(() => {});
-                  }
-                } catch (e) {
-                  console.warn("DropdownPicker: setLang error", e);
-                }
-              } else {
-                console.warn("DropdownPicker: no setter available on LanguageContext");
-              }
-            }}
-          >
-            <Text style={selectedCode === opt.code ? styles.btnTextActive : styles.btnText}>{opt.name}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+    <View style={styles.container}>
+      <FlatList
+        data={options}
+        renderItem={renderItem}
+        keyExtractor={(item) => item.value}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  label: { marginBottom: 6, fontWeight: "600" },
-  row: { flexDirection: "row", flexWrap: "wrap" },
-  btn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: "#ddd",
-    marginRight: 8,
-    marginBottom: 8,
+  container: { width: "100%", padding: 8 },
+  option: {
+    padding: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: "#ccc",
   },
-  btnActive: {
-    backgroundColor: "#007AFF",
-    borderColor: "#007AFF",
-  },
-  btnText: { color: "#333" },
-  btnTextActive: { color: "#fff" },
+  selectedOption: { backgroundColor: "#f2f2f2" },
+  optionText: { fontSize: 16 },
+  selectedText: { fontWeight: "bold", color: "#000" },
 });

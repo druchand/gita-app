@@ -1,72 +1,93 @@
-// src/components/LanguageModal.tsx
 import { useLanguage } from "@/context/LanguageContext";
 import React from "react";
-import { FlatList, ListRenderItem, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  FlatList,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 
-/**
- * Defensive type for language items: supports { code }, { id }, or { _id }.
- * This prevents FlatList/typing mismatch if different parts of app use different keys.
- */
-type AnyLangItem = { _id?: string; code?: string; id?: string; name?: string };
-
-const LanguageModal: React.FC = () => {
-  const { availableLangs, isOpen, closeLanguage, setLangCode } = useLanguage();
-
-  const renderItem: ListRenderItem<AnyLangItem> = ({ item }) => {
-    const code = item.code ?? item.id ?? item._id ?? "";
-    return (
-      <Pressable
-        onPress={() => {
-          setLangCode(code);
-        }}
-        style={styles.item}
-        accessibilityRole="button"
-      >
-        <Text style={styles.itemText}>{item.name ?? code}</Text>
-      </Pressable>
-    );
-  };
+export default function LanguageModal(): React.ReactElement | null {
+  const { availableLangs, closeLanguage, selectLanguage, loading, isLanguageOpen } =
+    useLanguage();
 
   return (
-    <Modal visible={!!isOpen} animationType="slide" transparent>
+    <Modal
+      visible={isLanguageOpen}
+      animationType="fade"
+      transparent
+      onRequestClose={closeLanguage}
+    >
       <View style={styles.backdrop}>
-        <View style={styles.modal}>
-          <Text style={styles.title}>Choose language</Text>
+        <View style={styles.card}>
+          <Text style={styles.title}>Select Language</Text>
 
-          <FlatList<AnyLangItem>
-            data={(availableLangs ?? []) as AnyLangItem[]}
-            keyExtractor={(i) => i._id ?? i.code ?? i.id ?? "unknown"}
-            renderItem={renderItem}
-            keyboardShouldPersistTaps="handled"
-          />
+          {loading ? (
+            <View style={styles.center}>
+              <ActivityIndicator />
+            </View>
+          ) : (
+            <FlatList
+              data={availableLangs}
+              keyExtractor={(item) => item._id ?? item.code}
+              ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
+              renderItem={({ item }) => (
+                <Pressable
+                  style={styles.langRow}
+                  onPress={() => {
+                    selectLanguage(item.code);
+                    closeLanguage();
+                  }}
+                >
+                  <Text style={styles.langName}>
+                    {item.name} ({item.code})
+                  </Text>
+                </Pressable>
+              )}
+            />
+          )}
 
-          <Pressable onPress={closeLanguage} style={styles.closeButton} accessibilityLabel="Close language selector" accessibilityRole="button">
-            <Text>Close</Text>
-          </Pressable>
+          <View style={styles.actions}>
+            <Pressable style={[styles.btn, styles.secondary]} onPress={closeLanguage}>
+              <Text style={styles.btnText}>Close</Text>
+            </Pressable>
+          </View>
         </View>
       </View>
     </Modal>
   );
-};
-
-export default LanguageModal;
+}
 
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
-    justifyContent: "center",
+    backgroundColor: "rgba(0,0,0,0.45)",
     alignItems: "center",
-  },
-  modal: {
-    width: "90%",
-    maxHeight: "80%",
-    backgroundColor: "#fff",
-    borderRadius: 8,
+    justifyContent: "center",
     padding: 16,
   },
-  title: { fontSize: 18, fontWeight: "700", marginBottom: 12 },
-  item: { paddingVertical: 12 },
-  itemText: { fontSize: 16 },
-  closeButton: { marginTop: 12, alignSelf: "flex-end" },
+  card: {
+    backgroundColor: "#fff",
+    width: "100%",
+    maxWidth: 520,
+    borderRadius: 16,
+    padding: 16,
+    gap: 12,
+  },
+  title: { fontSize: 18, fontWeight: "700" },
+  center: { paddingVertical: 16, alignItems: "center" },
+  langRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: "#f6f6f6",
+  },
+  langName: { fontSize: 16 },
+  actions: { flexDirection: "row", justifyContent: "flex-end" },
+  btn: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10 },
+  secondary: { backgroundColor: "#eee" },
+  btnText: { fontWeight: "600" },
 });

@@ -1,103 +1,112 @@
 // src/context/LanguageContext.tsx
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
-export type LangItem = {
-  _id?: string;
-  code: string;
-  name: string;
-};
+export type LangItem = { code: string; name: string; _id?: string };
 
-type LanguageContextValue = {
-  lang: string; // content language code (e.g., 'EN', 'HI')
-  langName?: string;
-  availableLangs: LangItem[];
-  isOpen: boolean; // whether language modal is visible
-  openLanguage: () => void;
-  closeLanguage: () => void;
-  setLangCode: (code: string) => Promise<void>;
-  setAvailableLangs: (langs: LangItem[]) => void;
-};
+export interface LanguageContextValue {
+  lang: string;                       // current language code, e.g. "EN"
+  availableLangs: LangItem[];         // list shown in LanguageModal
+  loading: boolean;                   // backend fetch in progress
+  openLanguage: () => void;           // open modal
+  closeLanguage: () => void;          // close modal
+  selectLanguage: (code: string) => void; // set language and close modal
+  isLanguageOpen: boolean;            // <-- used by LanguageModal
+}
 
-const LANG_STORAGE_KEY = "app:lang";
+const LanguageContext = createContext<LanguageContextValue | undefined>(
+  undefined
+);
 
-const LanguageContext = createContext<LanguageContextValue | undefined>(undefined);
+export function useLanguage(): LanguageContextValue {
+  const ctx = useContext(LanguageContext);
+  if (!ctx) {
+    throw new Error("useLanguage must be used within LanguageProvider");
+  }
+  return ctx;
+}
 
-export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const FALLBACK_LANGS: LangItem[] = [
+  { code: "EN", name: "English" },
+  { code: "HI", name: "Hindi" },
+];
+
+export function LanguageProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}): React.ReactElement {
   const [lang, setLang] = useState<string>("EN");
-  const [langName, setLangName] = useState<string | undefined>(undefined);
-  const [availableLangs, setAvailableLangs] = useState<LangItem[]>([]);
-  const [isOpen, setIsOpen] = useState<boolean>(false);
+  const [availableLangs, setAvailable] = useState<LangItem[]>(
+    FALLBACK_LANGS
+  );
+  const [loading, setLoading] = useState<boolean>(false);
 
+  // Modal visibility managed here so LanguageModal can read it
+  const [isLanguageOpen, setIsLanguageOpen] = useState<boolean>(false);
+
+  const openLanguage = () => setIsLanguageOpen(true);
+  const closeLanguage = () => setIsLanguageOpen(false);
+
+  // Select + close; external screens can refetch on lang change
+  const selectLanguage = (code: string) => {
+    setLang(code);
+    setIsLanguageOpen(false);
+  };
+
+  // Load available languages from backend (defensive; fallback kept)
   useEffect(() => {
-    // load persisted lang
+    let cancelled = false;
     (async () => {
       try {
-        const stored = await AsyncStorage.getItem(LANG_STORAGE_KEY);
-        if (stored) {
-          console.debug("[LanguageContext] loaded persisted lang:", stored);
-          setLang(stored);
+        setLoading(true);
+        const res = await fetch("https://eq21.co.in/_functions/AppLanguages");
+        if (!res.ok) throw new Error(res.statusText);
+        const data = await res.json();
+        // Expect either array of { code, name } or normalize common shapes
+        if (!cancelled && Array.isArray(data) && data.length) {
+          const norm: LangItem[] = data
+            .map((x: any) => ({
+              _id: x._id ?? x.id,
+              code: x.code ?? x.id ?? "",
+              name: x.name ?? x.title ?? "",
+            }))
+            .filter((x) => x.code && x.name);
+          if (norm.length) setAvailable(norm);
         }
-      } catch (err) {
-        console.warn("[LanguageContext] error reading persisted lang", err);
+      } catch (e) {
+        // swallow; fallback already in state
+        console.warn("[LanguageProvider] Failed to load languages:", e);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  const openLanguage = () => {
-    console.debug("[LanguageContext] openLanguage() - prev isOpen:", isOpen);
-    try {
-      setIsOpen(true);
-      console.debug("[LanguageContext] openLanguage() - requested visible: true");
-    } catch (err) {
-      console.warn("[LanguageContext] openLanguage() error", err);
-    }
-  };
-
-  const closeLanguage = () => {
-    console.debug("[LanguageContext] closeLanguage() - prev isOpen:", isOpen);
-    try {
-      setIsOpen(false);
-      console.debug("[LanguageContext] closeLanguage() - requested visible: false");
-    } catch (err) {
-      console.warn("[LanguageContext] closeLanguage() error", err);
-    }
-  };
-
-  const setLangCode = async (code: string) => {
-    console.debug("[LanguageContext] setLangCode() requested code:", code);
-    try {
-      setLang(code);
-      await AsyncStorage.setItem(LANG_STORAGE_KEY, code);
-      console.debug("[LanguageContext] setLangCode() persisted code:", code);
-    } catch (err) {
-      console.warn("[LanguageContext] setLangCode() error", err);
-    }
-  };
-
-  const setLangs = (langs: LangItem[]) => {
-    setAvailableLangs(langs);
-  };
 
   const value = useMemo<LanguageContextValue>(
     () => ({
       lang,
-      langName,
       availableLangs,
-      isOpen,
+      loading,
       openLanguage,
       closeLanguage,
-      setLangCode,
-      setAvailableLangs: setLangs,
+      selectLanguage,
+      isLanguageOpen,
     }),
-    [lang, langName, availableLangs, isOpen]
+    [lang, availableLangs, loading, isLanguageOpen]
   );
 
-  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
-};
-
-export function useLanguage(): LanguageContextValue {
-  const ctx = useContext(LanguageContext);
-  if (!ctx) throw new Error("useLanguage must be used within LanguageProvider");
-  return ctx;
+  return (
+    <LanguageContext.Provider value={value}>
+      {children}
+    </LanguageContext.Provider>
+  );
 }
