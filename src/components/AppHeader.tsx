@@ -1,17 +1,19 @@
 // src/components/AppHeader.tsx
-import { useMenuDrawer } from "@/components/MenuDrawer";
-import { useAuth } from "@/context/AuthModalContext";
-import { useLanguage } from "@/context/LanguageContext";
 import React from "react";
 import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-const HEADER_MIN_HEIGHT = 90;
+import { useMenuDrawer } from "@/components/MenuDrawer";
+import { useAuth } from "@/context/AuthModalContext";
+import { useLanguage } from "@/context/LanguageContext";
 
 export default function AppHeader(): React.ReactElement {
+  // Safe area must be read inside a component (after SafeAreaProvider is mounted)
   const insets = useSafeAreaInsets();
-  const topPad = Math.max(insets.top, 8);
-  const headerHeight = Math.max(HEADER_MIN_HEIGHT, topPad + 48);
+  const topPad = Math.max(insets?.top ?? 0, 8);
+
+  // 64 base, plus ~48 for the row, but never less than 64 overall
+  const headerHeight = Math.max(64, 48 + (insets?.top ?? 0));
 
   // contexts (providers are mounted by RootLayout)
   const menu = useMenuDrawer();

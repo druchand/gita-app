@@ -1,397 +1,147 @@
 // app/chapter/[id].tsx
-import CollapsibleText from "@/components/CollapsibleText";
 import { useLanguage } from "@/context/LanguageContext";
-import { Audio, AVPlaybackStatusSuccess } from "expo-av";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 type ChapterPayload = {
-  chapter?: string;
+  id?: string | number;
   title?: string;
-  lang?: string;
+  description?: string;
   audioUrl?: string;
   SanskritChapterAudioUrl?: string;
-  ytDescription?: string;
-  description?: string;
-  summary?: string;
+  // add any other fields you return
 };
 
-function formatTime(ms: number) {
-  if (!ms || ms <= 0) return "0:00";
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+function coerceId(param: string | string[] | undefined): string | null {
+  if (typeof param === "string" && param.length) return param;
+  if (Array.isArray(param) && param.length && typeof param[0] === "string") return param[0];
+  return null;
 }
 
-export default function ChapterPage() : React.ReactElement {
-  const params = useLocalSearchParams() as Record<string, string | undefined>;
-  const fetchId = params.id ?? params.chapter ?? null;
+export default function ChapterPage(): React.ReactElement {
+  const params = useLocalSearchParams<{ id?: string | string[] }>();
+  const fetchId = coerceId(params.id);
   const { lang } = useLanguage();
   const router = useRouter();
 
-  // Normalize lang to a simple code string (EN/Hl etc.)
-  const safeLang = typeof lang === "string" ? lang : (lang && (lang as any).code) ?? "EN";
-
-  const chapterEndpoint = useMemo(() => {
-    if (!fetchId) return null;
-    return `https://eq21.co.in/_functions/chapter?chapter=${encodeURIComponent(
-      String(fetchId)
-    )}&lang=${encodeURIComponent(safeLang)}`;
-  }, [fetchId, safeLang]);
-
-  const [loadingChapter, setLoadingChapter] = useState(false);
-  const [chapter, setChapter] = useState<ChapterPayload | null>(null);
-  const [chapterError, setChapterError] = useState<string | null>(null);
-
-  const [loadingVerses, setLoadingVerses] = useState(false);
-  const [versesError, setVersesError] = useState<string | null>(null);
-
-  // audio refs
-  const sanskritRef = useRef<Audio.Sound | null>(null);
-  const narrationRef = useRef<Audio.Sound | null>(null);
-
-  // sanskrit player state
-  const [sanskritPlaying, setSanskritPlaying] = useState(false);
-  const [sanskritPosition, setSanskritPosition] = useState(0);
-  const [sanskritDuration, setSanskritDuration] = useState(0);
-
-  // narration player state
-  const [narrationPlaying, setNarrationPlaying] = useState(false);
-  const [narrationPosition, setNarrationPosition] = useState(0);
-  const [narrationDuration, setNarrationDuration] = useState(0);
-
-  // --- fetch chapter metadata
-  const fetchChapter = useCallback(async () => {
-    if (!chapterEndpoint) {
-      setChapterError("Missing chapter id");
-      return;
-    }
-    setLoadingChapter(true);
-    setChapterError(null);
-    try {
-      console.log("[chapterPage] fetching chapter", chapterEndpoint);
-      const res = await fetch(chapterEndpoint);
-      const text = await res.text().catch(() => "<no body>");
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`);
-      const json = JSON.parse(text);
-      setChapter({
-        chapter: String(json.chapter ?? fetchId ?? ""),
-        title: json.title ?? json.name ?? `Chapter ${json.chapter ?? fetchId ?? ""}`,
-        lang: json.lang ?? safeLang,
-        audioUrl: json.audioUrl ?? json.narrationUrl ?? null,
-        SanskritChapterAudioUrl: json.SanskritChapterAudioUrl ?? json.sanskritAudio ?? null,
-        ytDescription: json.ytDescription ?? json.description ?? json.summary ?? "",
-      });
-    } catch (err: any) {
-      console.error("[chapterPage] fetch error", err);
-      setChapterError(err?.message ? String(err.message) : String(err));
-      setChapter(null);
-    } finally {
-      setLoadingChapter(false);
-    }
-  }, [chapterEndpoint, fetchId, safeLang]);
+  const [loading, setLoading] = useState(false);
+  const [payload, setPayload] = useState<ChapterPayload | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const mounted = useRef(true);
 
   useEffect(() => {
-    fetchChapter();
-  }, [fetchChapter]);
-
-  // unload helpers
-  const unloadSanskrit = useCallback(async () => {
-    try {
-      if (sanskritRef.current) {
-        await sanskritRef.current.unloadAsync();
-      }
-    } catch (e) {
-      // ignore
-    } finally {
-      sanskritRef.current = null;
-      setSanskritPlaying(false);
-      setSanskritPosition(0);
-      setSanskritDuration(0);
-    }
-  }, []);
-
-  const unloadNarration = useCallback(async () => {
-    try {
-      if (narrationRef.current) {
-        await narrationRef.current.unloadAsync();
-      }
-    } catch (e) {
-      // ignore
-    } finally {
-      narrationRef.current = null;
-      setNarrationPlaying(false);
-      setNarrationPosition(0);
-      setNarrationDuration(0);
-    }
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      await unloadSanskrit();
-      await unloadNarration();
-    })();
-  }, [chapter?.audioUrl, chapter?.SanskritChapterAudioUrl, unloadSanskrit, unloadNarration]);
-
-  useEffect(() => {
+    mounted.current = true;
     return () => {
-      (async () => {
-        await unloadSanskrit();
-        await unloadNarration();
-      })();
+      mounted.current = false;
     };
-  }, [unloadSanskrit, unloadNarration]);
+  }, []);
 
-  const handleSanskritToggle = useCallback(
-    async (url?: string) => {
-      if (!url) {
-        Alert.alert("No audio", "Sanskrit audio not available for this chapter.");
-        return;
-      }
-      try {
-        if (!sanskritRef.current) {
-          const { sound } = await Audio.Sound.createAsync(
-            { uri: url },
-            { shouldPlay: true },
-            (status) => {
-              if (status.isLoaded) {
-                const s = status as AVPlaybackStatusSuccess;
-                setSanskritPosition(s.positionMillis ?? 0);
-                setSanskritDuration(s.durationMillis ?? 0);
-                setSanskritPlaying(Boolean(s.isPlaying));
-              }
-            }
-          );
-          sanskritRef.current = sound;
-          const st = await sound.getStatusAsync();
-          if (st.isLoaded) {
-            const s = st as AVPlaybackStatusSuccess;
-            setSanskritPosition(s.positionMillis ?? 0);
-            setSanskritDuration(s.durationMillis ?? 0);
-            setSanskritPlaying(Boolean(s.isPlaying));
-          }
-        } else {
-          const status = await sanskritRef.current.getStatusAsync();
-          if (!status.isLoaded) {
-            await sanskritRef.current.loadAsync({ uri: url }, { shouldPlay: true });
-            setSanskritPlaying(true);
-          } else if (status.isPlaying) {
-            await sanskritRef.current.pauseAsync();
-            setSanskritPlaying(false);
-          } else {
-            await sanskritRef.current.playAsync();
-            setSanskritPlaying(true);
-          }
-          const newStatus = await sanskritRef.current.getStatusAsync();
-          if (newStatus.isLoaded) {
-            const s = newStatus as AVPlaybackStatusSuccess;
-            setSanskritPosition(s.positionMillis ?? 0);
-            setSanskritDuration(s.durationMillis ?? 0);
-            setSanskritPlaying(Boolean(s.isPlaying));
-          }
-        }
-      } catch (e) {
-        console.error("[chapterPage] sanskrit audio error", e);
-        Alert.alert("Audio error", "Unable to play Sanskrit audio.");
-      }
-    },
-    []
-  );
+  useEffect(() => {
+    const idForFetch = fetchId ?? null;
+    console.log("[chapterPage] resolved params:", params, "coerced id:", idForFetch, "lang:", lang);
 
-  const handleNarrationToggle = useCallback(
-    async (url?: string) => {
-      if (!url) {
-        Alert.alert("No audio", "Narration audio not available for this chapter.");
-        return;
-      }
-      try {
-        if (!narrationRef.current) {
-          const { sound } = await Audio.Sound.createAsync(
-            { uri: url },
-            { shouldPlay: true },
-            (status) => {
-              if (status.isLoaded) {
-                const s = status as AVPlaybackStatusSuccess;
-                setNarrationPosition(s.positionMillis ?? 0);
-                setNarrationDuration(s.durationMillis ?? 0);
-                setNarrationPlaying(Boolean(s.isPlaying));
-              }
-            }
-          );
-          narrationRef.current = sound;
-          const st = await sound.getStatusAsync();
-          if (st.isLoaded) {
-            const s = st as AVPlaybackStatusSuccess;
-            setNarrationPosition(s.positionMillis ?? 0);
-            setNarrationDuration(s.durationMillis ?? 0);
-            setNarrationPlaying(Boolean(s.isPlaying));
-          }
-        } else {
-          const status = await narrationRef.current.getStatusAsync();
-          if (!status.isLoaded) {
-            await narrationRef.current.loadAsync({ uri: url }, { shouldPlay: true });
-            setNarrationPlaying(true);
-          } else if (status.isPlaying) {
-            await narrationRef.current.pauseAsync();
-            setNarrationPlaying(false);
-          } else {
-            await narrationRef.current.playAsync();
-            setNarrationPlaying(true);
-          }
-          const newStatus = await narrationRef.current.getStatusAsync();
-          if (newStatus.isLoaded) {
-            const s = newStatus as AVPlaybackStatusSuccess;
-            setNarrationPosition(s.positionMillis ?? 0);
-            setNarrationDuration(s.durationMillis ?? 0);
-            setNarrationPlaying(Boolean(s.isPlaying));
-          }
-        }
-      } catch (e) {
-        console.error("[chapterPage] narration audio error", e);
-        Alert.alert("Audio error", "Unable to play narration audio.");
-      }
-    },
-    []
-  );
-
-  const openVersesPage = useCallback(() => {
-    if (!fetchId) {
-      setVersesError("Missing chapter id");
+    if (!idForFetch) {
+      setError("Missing chapter id.");
       return;
     }
-    router.push(
-      `/gitaVerses?chapter=${encodeURIComponent(String(fetchId))}&lang=${encodeURIComponent(safeLang)}`
-    );
-  }, [fetchId, safeLang, router]);
 
+    const url = `https://eq21.co.in/_functions/chapter?chapter=${encodeURIComponent(
+      idForFetch
+    )}&lang=${encodeURIComponent(lang)}`;
+    console.log("[chapterPage] fetching chapter", url);
+
+    setLoading(true);
+    setError(null);
+
+    fetch(url)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        // accept both {success, data} and direct object
+        const data: ChapterPayload = (json?.data ?? json) as ChapterPayload;
+        if (mounted.current) {
+          setPayload(data ?? {});
+        }
+      })
+      .catch((e) => {
+        console.warn("[chapterPage] fetch failed:", e);
+        if (mounted.current) setError(e?.message ?? "Failed to load chapter.");
+      })
+      .finally(() => {
+        if (mounted.current) setLoading(false);
+      });
+  }, [fetchId, lang]);
+
+  // ---- Render ----
   return (
-    <View style={styles.container}>
-      <Text style={styles.header}>Chapter</Text>
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Chapter</Text>
 
-      {loadingChapter ? (
-        <View style={styles.center}>
-          <ActivityIndicator />
-          <Text>Loading chapter…</Text>
-        </View>
-      ) : chapterError ? (
-        <View style={styles.center}>
-          <Text style={styles.error}>Unable to load chapter. {chapterError}</Text>
-          <TouchableOpacity style={styles.button} onPress={fetchChapter}>
-            <Text style={styles.buttonText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      ) : chapter ? (
+      {!fetchId && (
         <View style={styles.card}>
-          <Text style={styles.title}>{chapter.title ?? `Chapter ${fetchId}`}</Text>
-
-          {/* Sanskrit Recital */}
-          {chapter.SanskritChapterAudioUrl ? (
-            <View style={{ marginTop: 12 }}>
-              <Text style={{ fontWeight: "600", marginBottom: 6 }}>Sanskrit Recital</Text>
-              <View style={styles.audioRow}>
-                <TouchableOpacity
-                  onPress={() => handleSanskritToggle(chapter.SanskritChapterAudioUrl ?? undefined)}
-                  style={styles.iconButton}
-                >
-                  <Text style={styles.iconText}>{sanskritPlaying ? "⏸" : "▶"}</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.timeText}>
-                  {formatTime(sanskritPosition)} / {formatTime(sanskritDuration)}
-                </Text>
-              </View>
-            </View>
-          ) : null}
-
-          {/* Narration */}
-          {chapter.audioUrl ? (
-            <View style={{ marginTop: 12 }}>
-              <Text style={{ fontWeight: "600", marginBottom: 6 }}>Narration</Text>
-              <View style={styles.audioRow}>
-                <TouchableOpacity
-                  onPress={() => handleNarrationToggle(chapter.audioUrl ?? undefined)}
-                  style={styles.iconButton}
-                >
-                  <Text style={styles.iconText}>{narrationPlaying ? "⏸" : "▶"}</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.timeText}>
-                  {formatTime(narrationPosition)} / {formatTime(narrationDuration)}
-                </Text>
-              </View>
-            </View>
-          ) : null}
-
-          {/* Collapsible description */}
-          <View style={{ marginTop: 12 }}>
-            <CollapsibleText
-              text={chapter.ytDescription ?? ""}
-              numberOfLines={12}
-              readMoreText="...more"
-              showLessText="...less"
-              threshold={120}
-              textStyle={styles.summary}
-            />
-          </View>
-
-          <TouchableOpacity
-            style={[styles.button, { marginTop: 16 }]}
-            onPress={openVersesPage}
-            disabled={loadingVerses}
-          >
-            <Text style={styles.buttonText}>{loadingVerses ? "Loading verses..." : "Load Verses"}</Text>
+          <Text style={styles.error}>No chapter id provided in URL.</Text>
+          <TouchableOpacity onPress={() => router.back()} style={styles.btn}>
+            <Text style={styles.btnText}>Go Back</Text>
           </TouchableOpacity>
-
-          {versesError ? (
-            <View style={{ marginTop: 12 }}>
-              <Text style={styles.error}>Unable to load verses: {versesError}</Text>
-            </View>
-          ) : null}
-        </View>
-      ) : (
-        <View style={styles.center}>
-          <Text>No chapter data.</Text>
         </View>
       )}
-    </View>
+
+      {fetchId && loading && (
+        <View style={styles.card}>
+          <ActivityIndicator />
+          <Text style={styles.note}>Loading chapter {fetchId}…</Text>
+        </View>
+      )}
+
+      {fetchId && error && !loading && (
+        <View style={styles.card}>
+          <Text style={styles.error}>Error: {error}</Text>
+          <TouchableOpacity onPress={() => router.replace(`/chapter/${fetchId}`)} style={styles.btn}>
+            <Text style={styles.btnText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {fetchId && !loading && !error && (
+        <View style={styles.card}>
+          <Text style={styles.sectionTitle}>{payload?.title ?? `Chapter ${fetchId}`}</Text>
+          {!!payload?.description && <Text style={styles.note}>{payload.description}</Text>}
+
+          {/* If you want to re-enable audio later, wire it below using expo-audio
+             but only after payload is loaded and URLs exist. */}
+          {/* Example placeholders:
+          <AudioControls label="Sanskrit" url={payload?.SanskritChapterAudioUrl} />
+          <AudioControls label="Narration" url={payload?.audioUrl} />
+          */}
+        </View>
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 16, paddingHorizontal: 12 },
-  header: { fontSize: 20, fontWeight: "700", alignSelf: "center", marginBottom: 12 },
-  center: { alignItems: "center", justifyContent: "center", padding: 24 },
-  card: { padding: 12, borderRadius: 8, backgroundColor: "#fff" },
-  title: { fontSize: 18, fontWeight: "600" },
-  summary: { marginTop: 8, color: "#444", fontSize: 15, lineHeight: 22 },
-  button: {
-    marginTop: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: "#007AFF",
+  container: { padding: 16, gap: 12 },
+  card: {
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#e5e5ea",
+  },
+  title: { fontSize: 20, fontWeight: "700", marginBottom: 8 },
+  sectionTitle: { fontSize: 18, fontWeight: "600", marginBottom: 6 },
+  note: { color: "#666" },
+  error: { color: "#d00", fontWeight: "600" },
+  btn: {
+    marginTop: 12,
     alignSelf: "flex-start",
-  },
-  buttonText: { color: "#fff", fontWeight: "600" },
-  error: { color: "red" },
-  audioRow: { flexDirection: "row", alignItems: "center", marginTop: 6 },
-  iconButton: {
-    paddingVertical: 8,
     paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 8,
-    backgroundColor: "#eee",
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: "#e8f0ff",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "#a7c2ff",
   },
-  iconText: { fontSize: 18, fontWeight: "700" },
-  timeText: { marginLeft: 12, color: "#444", fontSize: 13 },
+  btnText: { color: "#2546bd", fontWeight: "600" },
 });

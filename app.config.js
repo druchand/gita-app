@@ -13,6 +13,11 @@ module.exports = {
       // optional if you have it
       WIX_AUTH_USERINFO_URL: "https://www.wixapis.com/oauth2/userinfo",
     },
+    plugins: [
+      // keep any existing plugins here
+      "expo-audio",
+      "expo-video",
+    ],
 scheme: "gitaapp", // must match APP_SCHEME,
   },
 };
