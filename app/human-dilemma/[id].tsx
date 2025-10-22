@@ -3,7 +3,7 @@ import CollapsibleText from "@/components/CollapsibleText";
 import { useLanguage } from "@/context/LanguageContext";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { VideoView, useVideoPlayer } from "expo-video";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
     Image,
@@ -13,6 +13,117 @@ import {
     Text,
     View,
 } from "react-native";
+
+// --- simple i18n for static UI strings (fallback to EN) ---
+const STRINGS: Record<string, Record<string, string>> = {
+  Back: {
+    EN: "Back",
+    HI: "वापस",
+    BN: "পিছনে",
+    TA: "பின் செல்ல",
+    TE: "వెనుకకు"
+  },
+  Loading: {
+    EN: "Loading…",
+    HI: "लोड हो रहा है…",
+    BN: "লোড হচ্ছে…",
+    TA: "ஏற்றப்படுகிறது…",
+    TE: "లోడ్ అవుతోంది…"
+  },
+  MissingId: {
+    EN: "Missing dilemma id.",
+    HI: "दुविधा आईडी नहीं मिली।",
+    BN: "দ্বিধার আইডি অনুপস্থিত।",
+    TA: "இருமனம் ID இல்லை.",
+    TE: "సందిగ్ధం ID లేదు."
+  },
+  FailedToLoad: {
+    EN: "Failed to load",
+    HI: "लोड करने में विफल",
+    BN: "লোড করতে ব্যর্থ",
+    TA: "ஏற்ற முடியவில்லை",
+    TE: "లోడ్ చేయడం విఫలమైంది"
+  },
+  Overview: {
+    EN: "Overview",
+    HI: "संक्षेप",
+    BN: "সংক্ষিপ্তসার",
+    TA: "சுருக்கம்",
+    TE: "సారాంశం"
+  },
+  English: {
+    EN: "English",
+    HI: "अंग्रेज़ी",
+    BN: "ইংরেজি",
+    TA: "ஆங்கிலம்",
+    TE: "ఇంగ్లీష్"
+  },
+  RelevantVerses: {
+    EN: "Relevant Gita Verses",
+    HI: "प्रासंगिक गीता श्लोक",
+    BN: "প্রাসঙ্গিক গীতা শ্লোক",
+    TA: "தொடர்புடைய கீதா ச்லோகங்கள்",
+    TE: "సంబంధిత గీతా శ్లోకాలు"
+  },
+  Play: {
+    EN: "▶︎ Play",
+    HI: "▶︎ चलाएँ",
+    BN: "▶︎ চালান",
+    TA: "▶︎ இயக்கவும்",
+    TE: "▶︎ ప్లే"
+  },
+  Pause: {
+    EN: "⏸ Pause",
+    HI: "⏸ रोकें",
+    BN: "⏸ বিরতি",
+    TA: "⏸ இடைநிறுத்தம்",
+    TE: "⏸ విరామం"
+  },
+  Recite: {
+    EN: "Recite",
+    HI: "पाठ",
+    BN: "পাঠ",
+    TA: "பாராயணம்",
+    TE: "పఠనం"
+  },
+  Learn: {
+    EN: "Learn",
+    HI: "सीखें",
+    BN: "শিখুন",
+    TA: "கற்பது",
+    TE: "నేర్చుకోండి"
+  },
+  Narration: {
+    EN: "Narration",
+    HI: "वाचन",
+    BN: "বর্ণনা",
+    TA: "வாசிப்பு",
+    TE: "వివరణ"
+  },
+  Hindi: {
+    EN: "Hindi",
+    HI: "हिंदी",
+    BN: "হিন্দি",
+    TA: "இந்தி",
+    TE: "హిందీ"
+  },
+  Chapter: {
+    EN: "Chapter",
+    HI: "अध्याय",
+    BN: "অধ্যায়",
+    TA: "அத்தியாயம்",
+    TE: "అధ్యాయం"
+  },
+  Verse: {
+    EN: "Verse",
+    HI: "श्लोक",
+    BN: "শ্লোক",
+    TA: "ச்லோகம்",
+    TE: "శ్లోకం"
+  },
+};
+const tt = (k: keyof typeof STRINGS, lang: string | undefined) =>
+  STRINGS[k][(lang || "EN").toUpperCase()] || STRINGS[k].EN;
 
 type Verse = {
   chapter?: number;
@@ -72,10 +183,10 @@ export default function HumanDilemmaDetail(): React.ReactElement {
 
         const mapped: Detail = {
           id: String(json.id ?? id),
-          title: String(title ?? json.title ?? "Untitled"),
+          title: String(json.title ?? title ?? "Untitled"),
           summary: pickString(json.summary, summary),
           image: pickString(json.image, image),
-          body: pickString(json.text, json.body, json.text_local),
+          body: pickString(json.text_local, json.body, json.text),
           bodyEN: pickString(json.textEn, json.text_en),
           audioUrl: pickString(json.audioUrl),
           videoUrl: pickString(json.videoUrl, json.video),
@@ -134,19 +245,32 @@ export default function HumanDilemmaDetail(): React.ReactElement {
   const [aPlaying, setAPlaying] = useState(false);
   const [aPos, setAPos] = useState(0);
   const [aDur, setADur] = useState(0);
+  const lastArticleUrlRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!audioUrl) return;
     (async () => {
       try {
+        console.debug("[article] replaceAsync with:", audioUrl);
         await articlePlayer?.replaceAsync?.({ uri: audioUrl });
-      } catch {}
+        lastArticleUrlRef.current = audioUrl;
+        setALoaded(true);
+      } catch (e) { console.debug("[article] replaceAsync error:", e); }
     })();
   }, [audioUrl, articlePlayer]);
 
   useEffect(() => {
     const s1 = articlePlayer?.addListener?.("statusChange", (s: any) => {
       if (!s) return;
+      console.debug(
+        "[article] statusChange:",
+        JSON.stringify({
+          isLoaded: s.isLoaded,
+          isPlaying: s.isPlaying,
+          pos: s.positionMillis,
+          dur: s.durationMillis,
+        })
+      );
       setALoaded(!!s.isLoaded);
       if (s.isLoaded) {
         setAPos(s.positionMillis ?? 0);
@@ -155,6 +279,7 @@ export default function HumanDilemmaDetail(): React.ReactElement {
       }
     });
     const s2 = articlePlayer?.addListener?.("timeUpdate", (s: any) => {
+      console.debug("[article] timeUpdate:", s?.positionMillis, "/", s?.durationMillis);
       if (!s) return;
       setAPos(s.positionMillis ?? 0);
       setADur(s.durationMillis ?? 0);
@@ -166,11 +291,23 @@ export default function HumanDilemmaDetail(): React.ReactElement {
   }, [articlePlayer]);
 
   const toggleArticleAudio = async () => {
+    console.debug("[article] toggle pressed; playing:", aPlaying, "url:", audioUrl);
     try {
-      if (!aLoaded) return;
-      if (aPlaying) await articlePlayer?.pause?.();
-      else await articlePlayer?.play?.();
-    } catch {}
+      if (audioUrl && lastArticleUrlRef.current !== audioUrl) {
+        console.debug("[article] replacing to current url:", audioUrl);
+        await articlePlayer?.replaceAsync?.({ uri: audioUrl });
+        lastArticleUrlRef.current = audioUrl;
+      }
+      if (aPlaying) {
+        await articlePlayer?.pause?.();
+        setAPlaying(false);
+      } else {
+        await articlePlayer?.play?.();
+        setAPlaying(true);
+      }
+    } catch (e) {
+      console.debug("[article] toggle error:", e);
+    }
   };
 
   // VIDEO (autoplay, loop, no controls/labels)
@@ -200,10 +337,20 @@ export default function HumanDilemmaDetail(): React.ReactElement {
   const [vDur, setVDur] = useState(0);
   const [currentVerseKey, setCurrentVerseKey] = useState<string | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const lastVerseUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     const s1 = versesPlayer?.addListener?.("statusChange", (s: any) => {
       if (!s) return;
+      console.debug(
+        "[verses] statusChange:",
+        JSON.stringify({
+          isLoaded: s.isLoaded,
+          isPlaying: s.isPlaying,
+          pos: s.positionMillis,
+          dur: s.durationMillis,
+        })
+      );
       setVLoaded(!!s.isLoaded);
       if (s.isLoaded) {
         setVPos(s.positionMillis ?? 0);
@@ -212,6 +359,7 @@ export default function HumanDilemmaDetail(): React.ReactElement {
       }
     });
     const s2 = versesPlayer?.addListener?.("timeUpdate", (s: any) => {
+      console.debug("[verses] timeUpdate:", s?.positionMillis, "/", s?.durationMillis);
       if (!s) return;
       setVPos(s.positionMillis ?? 0);
       setVDur(s.durationMillis ?? 0);
@@ -242,31 +390,50 @@ export default function HumanDilemmaDetail(): React.ReactElement {
   const playVerseUrl = async (url?: string, keyForBlock?: string) => {
     if (!url) return;
     try {
+      console.debug("[verses] replaceAsync with:", url, " block:", keyForBlock);
       if (keyForBlock && expandedKey !== keyForBlock) {
         await collapseAllVerses();
         setExpandedKey(keyForBlock);
       }
       setCurrentVerseKey(url);
-      await versesPlayer?.replaceAsync?.({ uri: url });
+      if (lastVerseUrlRef.current !== url) {
+        console.debug("[verses] will replace to new url");
+        await versesPlayer?.replaceAsync?.({ uri: url });
+        lastVerseUrlRef.current = url;
+      } else {
+        console.debug("[verses] same url; skipping replace");
+      }
       await versesPlayer?.play?.();
-    } catch {}
+    } catch (e) { console.debug("[verses] replace/play error:", e); }
   };
 
   const toggleVersesAudio = async () => {
     try {
-      if (!vLoaded) return;
-      if (vPlaying) await versesPlayer?.pause?.();
-      else await versesPlayer?.play?.();
-    } catch {}
+      console.debug("[verses] toggle pressed; playing:", vPlaying, "current:", currentVerseKey);
+      if (currentVerseKey && lastVerseUrlRef.current !== currentVerseKey) {
+        console.debug("[verses] replacing to current url:", currentVerseKey);
+        await versesPlayer?.replaceAsync?.({ uri: currentVerseKey });
+        lastVerseUrlRef.current = currentVerseKey;
+      }
+      if (vPlaying) {
+        await versesPlayer?.pause?.();
+        setVPlaying(false);
+      } else {
+        await versesPlayer?.play?.();
+        setVPlaying(true);
+      }
+    } catch (e) {
+      console.debug("[verses] toggle error:", e);
+    }
   };
 
   // Guards
   if (!id)
     return (
       <View style={styles.center}>
-        <Text style={styles.error}>Missing dilemma id.</Text>
+        <Text style={styles.error}>{tt("MissingId", lang)}</Text>
         <Pressable style={styles.cta} onPress={() => router.back()}>
-          <Text style={styles.ctaText}>Back</Text>
+          <Text style={styles.ctaText}>{tt("Back", lang)}</Text>
         </Pressable>
       </View>
     );
@@ -274,15 +441,15 @@ export default function HumanDilemmaDetail(): React.ReactElement {
     return (
       <View style={styles.center}>
         <ActivityIndicator />
-        <Text>Loading…</Text>
+        <Text>{tt("Loading", lang)}</Text>
       </View>
     );
   if (state.status === "error")
     return (
       <View style={styles.center}>
-        <Text style={styles.error}>Failed to load: {state.message}</Text>
+        <Text style={styles.error}>{tt("FailedToLoad", lang)}: {state.message}</Text>
         <Pressable style={styles.cta} onPress={() => router.back()}>
-          <Text style={styles.ctaText}>Back</Text>
+          <Text style={styles.ctaText}>{tt("Back", lang)}</Text>
         </Pressable>
       </View>
     );
@@ -313,7 +480,7 @@ export default function HumanDilemmaDetail(): React.ReactElement {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Pressable style={[styles.cta, { alignSelf: "flex-start" }]} onPress={() => router.back()}>
-        <Text style={styles.ctaText}>Back</Text>
+        <Text style={styles.ctaText}>{tt("Back", lang)}</Text>
       </Pressable>
 
       {/* Title row + inline audio control (progress below) */}
@@ -323,18 +490,17 @@ export default function HumanDilemmaDetail(): React.ReactElement {
         {data.audioUrl ? (
           <>
             <VideoView
-              style={{ width: 0, height: 0 }}
+              style={{ position: "absolute", width: 1, height: 1, opacity: 0.01 }}
               player={articlePlayer}
               nativeControls={false}
               allowsFullscreen={false}
               allowsPictureInPicture={false}
             />
             <Pressable
-              style={[styles.cta, !aLoaded && styles.ctaDisabled]}
+              style={styles.cta}
               onPress={toggleArticleAudio}
-              disabled={!aLoaded}
             >
-              <Text style={styles.ctaText}>{aPlaying ? "⏸ Pause" : "▶︎ Play"}</Text>
+              <Text style={styles.ctaText}>{aPlaying ? tt("Pause", lang) : tt("Play", lang)}</Text>
             </Pressable>
           </>
         ) : null}
@@ -373,7 +539,7 @@ export default function HumanDilemmaDetail(): React.ReactElement {
       {/* Overview (requested lang) */}
       {!!data.body && (
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Overview</Text>
+          <Text style={styles.sectionTitle}>{tt("Overview", lang)}</Text>
           <CollapsibleText numberOfLines={4} textStyle={styles.body} text={data.body} />
         </View>
       )}
@@ -381,7 +547,7 @@ export default function HumanDilemmaDetail(): React.ReactElement {
       {/* English (only if provided) */}
       {!!data.bodyEN && (
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>English</Text>
+          <Text style={styles.sectionTitle}>{tt("English", lang)}</Text>
           <CollapsibleText numberOfLines={4} textStyle={styles.body} text={data.bodyEN} />
         </View>
       )}
@@ -389,28 +555,27 @@ export default function HumanDilemmaDetail(): React.ReactElement {
       {/* Relevant verses */}
       {data.verses && data.verses.length > 0 && (
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Relevant Gita verses</Text>
+          <Text style={styles.sectionTitle}>{tt("RelevantVerses", lang)}</Text>
 
           {/* shared hidden host */}
           <VideoView
-            style={{ width: 0, height: 0 }}
+            style={{ position: "absolute", width: 1, height: 1, opacity: 0.01 }}
             player={versesPlayer}
             nativeControls={false}
             allowsFullscreen={false}
             allowsPictureInPicture={false}
           />
 
-          {/* shared progress bar (only when a verse is active) */}
-          {currentVerseKey ? (
+          {/* shared progress bar (shows when a verse is selected OR loading) */}
+          {currentVerseKey || vLoaded ? (
             <View style={{ marginBottom: 8 }}>
               <ProgressBar pos={vPos} dur={vDur} />
               <View style={[styles.row, { marginTop: 6 }]}>
                 <Pressable
-                  style={[styles.cta, !vLoaded && styles.ctaDisabled]}
+                  style={styles.cta}
                   onPress={toggleVersesAudio}
-                  disabled={!vLoaded}
                 >
-                  <Text style={styles.ctaText}>{vPlaying ? "⏸ Pause" : "▶︎ Play"}</Text>
+                  <Text style={styles.ctaText}>{vPlaying ? tt("Pause", lang) : tt("Play", lang)}</Text>
                 </Pressable>
                 <Text style={styles.timeLabel}>
                   {toMMSS(vPos)} / {toMMSS(vDur)}
@@ -420,14 +585,16 @@ export default function HumanDilemmaDetail(): React.ReactElement {
           ) : null}
 
           {data.verses.map((v, idx) => {
-            const header = v.chapter && v.verse ? `Chapter ${v.chapter}, Verse ${v.verse}` : `Verse ${idx + 1}`;
+            const header = v.chapter && v.verse
+              ? `${tt("Chapter", lang)} ${v.chapter}, ${tt("Verse", lang)} ${v.verse}`
+              : `${tt("Verse", lang)} ${idx + 1}`;
             const blockKey = `${v.chapter ?? "x"}-${v.verse ?? idx}`;
 
             const items: { key: string; url?: string; title: string }[] = [
-              { key: "recite", url: v.recite, title: "Recite" },
-              { key: "learn2recite", url: v.learn2recite, title: "Learn" },
-              { key: "narration", url: v.narration, title: "Narration" },
-              { key: "hindiNarration", url: v.hindiNarration, title: "Hindi" },
+              { key: "recite", url: v.recite, title: tt("Recite", lang) },
+              { key: "learn2recite", url: v.learn2recite, title: tt("Learn", lang) },
+              { key: "narration", url: v.narration, title: tt("Narration", lang) },
+              { key: "hindiNarration", url: v.hindiNarration, title: tt("Hindi", lang) },
             ];
 
             const expanded = expandedKey === blockKey;
@@ -451,7 +618,13 @@ export default function HumanDilemmaDetail(): React.ReactElement {
                               styles.pillRow,
                               currentVerseKey === it.url ? styles.pillActive : null,
                             ]}
-                            onPress={() => playVerseUrl(it.url, blockKey)}
+                            onPress={async () => {
+                              if (currentVerseKey === it.url) {
+                                await toggleVersesAudio();
+                              } else {
+                                await playVerseUrl(it.url, blockKey);
+                              }
+                            }}
                           >
                             <Text
                               style={[
